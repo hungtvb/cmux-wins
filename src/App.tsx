@@ -1,5 +1,5 @@
 import { BellOff, Columns2, FolderPlus, PanelLeftClose } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import type { Pane, Workspace } from "./types";
@@ -49,6 +49,7 @@ export default function App() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(() => workspaces[0].id);
   const [attention, setAttention] = useState<Record<string, string>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
 
   const activeWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0],
@@ -56,10 +57,15 @@ export default function App() {
   );
 
   useEffect(() => {
+    activeWorkspaceIdRef.current = activeWorkspaceId;
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaces));
   }, [workspaces]);
 
   const selectWorkspace = useCallback((workspaceId: string) => {
+    activeWorkspaceIdRef.current = workspaceId;
     setActiveWorkspaceId(workspaceId);
     setWorkspaces((current) =>
       current.map((workspace) =>
@@ -76,6 +82,7 @@ export default function App() {
 
     const cwd = window.prompt("Working directory (optional)", "")?.trim() ?? "";
     const workspace = createWorkspace(title, cwd);
+    activeWorkspaceIdRef.current = workspace.id;
     setWorkspaces((current) => [...current, workspace]);
     setActiveWorkspaceId(workspace.id);
   }, [workspaces.length]);
@@ -113,19 +120,16 @@ export default function App() {
     );
   }, []);
 
-  const handleAttention = useCallback(
-    (sessionId: string, message: string) => {
-      setAttention((current) => ({ ...current, [sessionId]: message }));
-      setWorkspaces((current) =>
-        current.map((workspace) =>
-          workspace.panes.some((pane) => pane.id === sessionId)
-            ? { ...workspace, unread: workspace.id !== activeWorkspaceId }
-            : workspace,
-        ),
-      );
-    },
-    [activeWorkspaceId],
-  );
+  const handleAttention = useCallback((sessionId: string, message: string) => {
+    setAttention((current) => ({ ...current, [sessionId]: message }));
+    setWorkspaces((current) =>
+      current.map((workspace) =>
+        workspace.panes.some((pane) => pane.id === sessionId)
+          ? { ...workspace, unread: workspace.id !== activeWorkspaceIdRef.current }
+          : workspace,
+      ),
+    );
+  }, []);
 
   const handleTitleChange = useCallback((sessionId: string, title: string) => {
     setWorkspaces((current) =>
