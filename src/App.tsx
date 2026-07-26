@@ -35,7 +35,9 @@ function loadWorkspaces(): Workspace[] {
     return parsed.map((workspace) => ({
       ...workspace,
       unread: false,
-      panes: workspace.panes?.length ? workspace.panes.map((pane) => ({ ...pane, id: crypto.randomUUID() })) : [createPane()],
+      panes: workspace.panes?.length
+        ? workspace.panes.map((pane) => ({ ...pane, id: crypto.randomUUID() }))
+        : [createPane()],
     }));
   } catch {
     return [createWorkspace("Main")];
@@ -92,27 +94,24 @@ export default function App() {
     );
   }, [activeWorkspace]);
 
-  const closePane = useCallback(
-    (sessionId: string) => {
-      setAttention((current) => {
-        const next = { ...current };
-        delete next[sessionId];
-        return next;
-      });
+  const closePane = useCallback((sessionId: string) => {
+    setAttention((current) => {
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
 
-      setWorkspaces((current) =>
-        current.map((workspace) => {
-          if (workspace.id !== activeWorkspaceId) {
-            return workspace;
-          }
+    setWorkspaces((current) =>
+      current.map((workspace) => {
+        if (!workspace.panes.some((pane) => pane.id === sessionId)) {
+          return workspace;
+        }
 
-          const remaining = workspace.panes.filter((pane) => pane.id !== sessionId);
-          return { ...workspace, panes: remaining.length ? remaining : [createPane()] };
-        }),
-      );
-    },
-    [activeWorkspaceId],
-  );
+        const remaining = workspace.panes.filter((pane) => pane.id !== sessionId);
+        return { ...workspace, panes: remaining.length ? remaining : [createPane()] };
+      }),
+    );
+  }, []);
 
   const handleAttention = useCallback(
     (sessionId: string, message: string) => {
@@ -204,23 +203,33 @@ export default function App() {
           </div>
         </header>
 
-        <div
-          className="pane-grid"
-          style={{
-            gridTemplateColumns: `repeat(${Math.min(activeWorkspace.panes.length, 2)}, minmax(0, 1fr))`,
-          }}
-        >
-          {activeWorkspace.panes.map((pane) => (
-            <TerminalPane
-              key={pane.id}
-              sessionId={pane.id}
-              title={pane.title}
-              cwd={activeWorkspace.cwd}
-              attention={Boolean(attention[pane.id])}
-              onAttention={handleAttention}
-              onTitleChange={handleTitleChange}
-              onClose={closePane}
-            />
+        <div className="workspace-stage">
+          {workspaces.map((workspace) => (
+            <div
+              className={`workspace-surface${workspace.id === activeWorkspace.id ? " workspace-surface--active" : ""}`}
+              key={workspace.id}
+              aria-hidden={workspace.id !== activeWorkspace.id}
+            >
+              <div
+                className="pane-grid"
+                style={{
+                  gridTemplateColumns: `repeat(${Math.min(workspace.panes.length, 2)}, minmax(0, 1fr))`,
+                }}
+              >
+                {workspace.panes.map((pane) => (
+                  <TerminalPane
+                    key={pane.id}
+                    sessionId={pane.id}
+                    title={pane.title}
+                    cwd={workspace.cwd}
+                    attention={Boolean(attention[pane.id])}
+                    onAttention={handleAttention}
+                    onTitleChange={handleTitleChange}
+                    onClose={closePane}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </section>
