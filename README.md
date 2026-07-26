@@ -14,10 +14,12 @@ Implemented on `feat/windows-mvp`:
 - PowerShell terminals backed by ConPTY
 - Split terminal panes
 - Terminal resize and process cleanup
+- Workspace close lifecycle with PTY cleanup
+- Keyboard shortcuts for common workspace actions
 - OSC 9/99/777 agent-attention detection
 - Per-pane attention ring and unread workspace indicator
 - MSI and NSIS bundle configuration
-- Windows CI for frontend and Rust checks
+- Windows CI for frontend, Rust, and installer artifacts
 
 Not implemented yet:
 
@@ -68,6 +70,16 @@ $env:CMUX_SHELL = "pwsh.exe"
 npm run tauri dev
 ```
 
+## Keyboard shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+N` | Create workspace |
+| `Ctrl+1` … `Ctrl+9` | Switch workspace |
+| `Ctrl+B` | Toggle sidebar |
+| `Ctrl+Shift+D` | Split current workspace |
+| `Ctrl+Shift+W` | Close current workspace |
+
 ## Build installers
 
 ```powershell
@@ -76,6 +88,8 @@ npm run tauri build
 ```
 
 Generated MSI and NSIS installers are written under `src-tauri\target\release\bundle`.
+
+The Windows CI workflow also uploads both installers as the `cmux-windows-installers` artifact after the compile checks pass.
 
 ## Agent notification smoke test
 
