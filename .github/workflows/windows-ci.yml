@@ -1,0 +1,39 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main, feat/windows-mvp]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Type-check and build frontend
+        run: npm run build
+
+      - name: Check Rust backend
+        run: cargo check --manifest-path src-tauri/Cargo.toml
