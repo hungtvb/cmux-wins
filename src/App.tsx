@@ -1,5 +1,6 @@
-import { BellOff, Columns2, FolderPlus, PanelLeftClose } from "lucide-react";
+import { BellOff, Columns2, FolderPlus, PanelLeftClose, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import type { Pane, Workspace } from "./types";
@@ -23,14 +24,10 @@ function createWorkspace(title = "Workspace", cwd = ""): Workspace {
 function loadWorkspaces(): Workspace[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return [createWorkspace("Main")];
-    }
+    if (!raw) return [createWorkspace("Main")];
 
     const parsed = JSON.parse(raw) as Workspace[];
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return [createWorkspace("Main")];
-    }
+    if (!Array.isArray(parsed) || parsed.length === 0) return [createWorkspace("Main")];
 
     return parsed.map((workspace) => ({
       ...workspace,
@@ -76,9 +73,7 @@ export default function App() {
 
   const addWorkspace = useCallback(() => {
     const title = window.prompt("Workspace name", `Workspace ${workspaces.length + 1}`)?.trim();
-    if (!title) {
-      return;
-    }
+    if (!title) return;
 
     const cwd = window.prompt("Working directory (optional)", "")?.trim() ?? "";
     const workspace = createWorkspace(title, cwd);
@@ -88,9 +83,7 @@ export default function App() {
   }, [workspaces.length]);
 
   const splitPane = useCallback(() => {
-    if (!activeWorkspace) {
-      return;
-    }
+    if (!activeWorkspace) return;
 
     setWorkspaces((current) =>
       current.map((workspace) =>
@@ -110,14 +103,39 @@ export default function App() {
 
     setWorkspaces((current) =>
       current.map((workspace) => {
-        if (!workspace.panes.some((pane) => pane.id === sessionId)) {
-          return workspace;
-        }
-
+        if (!workspace.panes.some((pane) => pane.id === sessionId)) return workspace;
         const remaining = workspace.panes.filter((pane) => pane.id !== sessionId);
         return { ...workspace, panes: remaining.length ? remaining : [createPane()] };
       }),
     );
+  }, []);
+
+  const closeWorkspace = useCallback((workspaceId: string) => {
+    setWorkspaces((current) => {
+      const target = current.find((workspace) => workspace.id === workspaceId);
+      if (!target) return current;
+
+      for (const pane of target.panes) {
+        void invoke("close_terminal", { sessionId: pane.id });
+      }
+
+      setAttention((currentAttention) => {
+        const next = { ...currentAttention };
+        for (const pane of target.panes) delete next[pane.id];
+        return next;
+      });
+
+      const remaining = current.filter((workspace) => workspace.id !== workspaceId);
+      const nextWorkspaces = remaining.length ? remaining : [createWorkspace("Main")];
+
+      if (activeWorkspaceIdRef.current === workspaceId) {
+        const nextActive = nextWorkspaces[0].id;
+        activeWorkspaceIdRef.current = nextActive;
+        setActiveWorkspaceId(nextActive);
+      }
+
+      return nextWorkspaces;
+    });
   }, []);
 
   const handleAttention = useCallback((sessionId: string, message: string) => {
@@ -143,9 +161,7 @@ export default function App() {
   }, []);
 
   const clearAttention = useCallback(() => {
-    if (!activeWorkspace) {
-      return;
-    }
+    if (!activeWorkspace) return;
 
     const activeIds = new Set(activeWorkspace.panes.map((pane) => pane.id));
     setAttention((current) =>
@@ -158,9 +174,40 @@ export default function App() {
     );
   }, [activeWorkspace]);
 
-  if (!activeWorkspace) {
-    return null;
-  }
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey) return;
+
+      if (event.key >= "1" && event.key <= "9") {
+        const workspace = workspaces[Number(event.key) - 1];
+        if (workspace) {
+          event.preventDefault();
+          selectWorkspace(workspace.id);
+        }
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "b" && !event.shiftKey) {
+        event.preventDefault();
+        setSidebarOpen((open) => !open);
+      } else if (key === "n" && !event.shiftKey) {
+        event.preventDefault();
+        addWorkspace();
+      } else if (key === "d" && event.shiftKey) {
+        event.preventDefault();
+        splitPane();
+      } else if (key === "w" && event.shiftKey && activeWorkspace) {
+        event.preventDefault();
+        closeWorkspace(activeWorkspace.id);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [activeWorkspace, addWorkspace, closeWorkspace, selectWorkspace, splitPane, workspaces]);
+
+  if (!activeWorkspace) return null;
 
   return (
     <main className={`app-shell${sidebarOpen ? "" : " app-shell--sidebar-closed"}`}>
@@ -170,6 +217,7 @@ export default function App() {
           activeWorkspaceId={activeWorkspace.id}
           onSelect={selectWorkspace}
           onAdd={addWorkspace}
+          onClose={closeWorkspace}
         />
       )}
 
@@ -179,7 +227,7 @@ export default function App() {
             <button
               className="icon-button"
               type="button"
-              title={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              title={sidebarOpen ? "Hide sidebar (Ctrl+B)" : "Show sidebar (Ctrl+B)"}
               aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
               onClick={() => setSidebarOpen((open) => !open)}
             >
@@ -192,17 +240,26 @@ export default function App() {
           </div>
 
           <div className="topbar__actions">
-            <button className="toolbar-button" type="button" onClick={addWorkspace}>
+            <button className="toolbar-button" type="button" onClick={addWorkspace} title="Ctrl+N">
               <FolderPlus size={16} />
               New workspace
             </button>
-            <button className="toolbar-button" type="button" onClick={splitPane}>
+            <button className="toolbar-button" type="button" onClick={splitPane} title="Ctrl+Shift+D">
               <Columns2 size={16} />
               Split right
             </button>
             <button className="toolbar-button" type="button" onClick={clearAttention}>
               <BellOff size={16} />
               Mark read
+            </button>
+            <button
+              className="toolbar-button toolbar-button--danger"
+              type="button"
+              onClick={() => closeWorkspace(activeWorkspace.id)}
+              title="Ctrl+Shift+W"
+            >
+              <Trash2 size={16} />
+              Close workspace
             </button>
           </div>
         </header>
