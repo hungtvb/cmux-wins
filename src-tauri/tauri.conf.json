@@ -31,6 +31,7 @@
   "bundle": {
     "active": true,
     "targets": ["msi", "nsis"],
+    "icon": ["icons/icon.ico"],
     "shortDescription": "Terminal workspaces for AI coding agents on Windows 11",
     "longDescription": "A Windows 11 port of the cmux workflow with workspaces, split terminal panes, and agent attention notifications."
   }
