@@ -56,7 +56,7 @@ export function useTerminalSession({
         cyan: "#74c7d8",
         brightCyan: "#9adce8",
         white: "#d7dce5",
-        brightWhite: "#ffffff"
+        brightWhite: "#ffffff",
       },
     });
     const fitAddon = new FitAddon();
@@ -65,19 +65,35 @@ export function useTerminalSession({
     fitAddon.fit();
 
     let disposed = false;
+    let started = false;
     let unlisten: UnlistenFn | undefined;
+    let notificationBuffer = "";
+    const pendingInput: string[] = [];
+
+    const scanNotifications = (chunk: string) => {
+      notificationBuffer += chunk;
+      let consumed = 0;
+
+      for (const match of notificationBuffer.matchAll(notificationPattern)) {
+        onAttention(match[1]?.trim() || "Agent requires attention");
+        consumed = (match.index ?? 0) + match[0].length;
+      }
+
+      if (consumed > 0) {
+        notificationBuffer = notificationBuffer.slice(consumed);
+      } else if (notificationBuffer.length > 4096) {
+        notificationBuffer = notificationBuffer.slice(-256);
+      }
+    };
 
     const start = async () => {
       unlisten = await listen<TerminalOutputEvent>("terminal-output", (event) => {
-        if (event.payload.sessionId !== sessionId) {
+        if (event.payload.sessionId !== sessionId || disposed) {
           return;
         }
 
         terminal.write(event.payload.data);
-
-        for (const match of event.payload.data.matchAll(notificationPattern)) {
-          onAttention(match[1]?.trim() || "Agent requires attention");
-        }
+        scanNotifications(event.payload.data);
       });
 
       if (disposed) {
@@ -91,15 +107,34 @@ export function useTerminalSession({
         cols: terminal.cols,
         rows: terminal.rows,
       });
+
+      if (disposed) {
+        await invoke("close_terminal", { sessionId }).catch(() => undefined);
+        return;
+      }
+
+      started = true;
+      for (const data of pendingInput.splice(0)) {
+        await invoke("write_terminal", { sessionId, data });
+      }
     };
 
     void start().catch((error) => {
-      terminal.writeln(`\r\n[cmux] Failed to start terminal: ${String(error)}\r\n`);
+      if (!disposed) {
+        terminal.writeln(`\r\n[cmux] Failed to start terminal: ${String(error)}\r\n`);
+      }
     });
 
     const inputDisposable = terminal.onData((data) => {
+      if (!started) {
+        pendingInput.push(data);
+        return;
+      }
+
       void invoke("write_terminal", { sessionId, data }).catch((error) => {
-        terminal.writeln(`\r\n[cmux] Input error: ${String(error)}\r\n`);
+        if (!disposed) {
+          terminal.writeln(`\r\n[cmux] Input error: ${String(error)}\r\n`);
+        }
       });
     });
 
@@ -111,11 +146,15 @@ export function useTerminalSession({
 
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
+      if (!started) {
+        return;
+      }
+
       void invoke("resize_terminal", {
         sessionId,
         cols: terminal.cols,
         rows: terminal.rows,
-      });
+      }).catch(() => undefined);
     });
     resizeObserver.observe(host);
 
@@ -126,7 +165,7 @@ export function useTerminalSession({
       titleDisposable.dispose();
       unlisten?.();
       terminal.dispose();
-      void invoke("close_terminal", { sessionId });
+      void invoke("close_terminal", { sessionId }).catch(() => undefined);
     };
   }, [cwd, onAttention, onTitleChange, sessionId]);
 
