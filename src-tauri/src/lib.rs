@@ -6,7 +6,7 @@ use std::{
     sync::Mutex,
     thread,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,10 +71,12 @@ fn spawn_terminal(
         })
         .map_err(|error| format!("unable to open ConPTY: {error}"))?;
 
-    let mut command = CommandBuilder::new(
-        std::env::var("CMUX_SHELL").unwrap_or_else(|_| "powershell.exe".to_owned()),
-    );
-    command.arg("-NoLogo");
+    let shell = std::env::var("CMUX_SHELL").unwrap_or_else(|_| "powershell.exe".to_owned());
+    let mut command = CommandBuilder::new(&shell);
+    let shell_name = shell.to_ascii_lowercase();
+    if shell_name.contains("powershell") || shell_name.contains("pwsh") {
+        command.arg("-NoLogo");
+    }
 
     if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
         command.cwd(cwd);
@@ -83,7 +85,7 @@ fn spawn_terminal(
     let child = pair
         .slave
         .spawn_command(command)
-        .map_err(|error| format!("unable to spawn PowerShell: {error}"))?;
+        .map_err(|error| format!("unable to spawn shell '{shell}': {error}"))?;
     let mut reader = pair
         .master
         .try_clone_reader()
@@ -127,6 +129,10 @@ fn spawn_terminal(
                     break;
                 }
             }
+        }
+
+        if let Ok(mut sessions) = app.state::<AppState>().sessions.lock() {
+            sessions.remove(&session_id);
         }
     });
 
