@@ -35,4 +35,25 @@ jobs:
         run: npm run build
 
       - name: Check Rust backend
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+        id: cargo-check
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          cmd /c "cargo check --manifest-path src-tauri/Cargo.toml > cargo-check.log 2>&1"
+          $exitCode = $LASTEXITCODE
+          Get-Content cargo-check.log
+          exit $exitCode
+
+      - name: Upload Rust check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-check-log
+          path: cargo-check.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail when Rust check failed
+        if: steps.cargo-check.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
