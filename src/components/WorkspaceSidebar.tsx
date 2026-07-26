@@ -1,4 +1,4 @@
-import { BellRing, Plus, TerminalSquare } from "lucide-react";
+import { BellRing, Plus, SquareTerminal } from "lucide-react";
 import type { Workspace } from "../types";
 
 type WorkspaceSidebarProps = {
@@ -46,7 +46,7 @@ export function WorkspaceSidebar({
             onClick={() => onSelect(workspace.id)}
           >
             <span className="workspace-item__shortcut">{index + 1}</span>
-            <TerminalSquare size={16} />
+            <SquareTerminal size={16} />
             <span className="workspace-item__body">
               <strong>{workspace.title}</strong>
               <small>{workspace.cwd || "PowerShell"}</small>
