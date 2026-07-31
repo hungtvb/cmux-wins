@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   useEffect,
   useRef,
@@ -50,8 +50,9 @@ export function useAutomationBridge({
 
   useEffect(() => {
     let disposed = false;
+    let unlisten: UnlistenFn | undefined;
 
-    const unlistenPromise = listen<AutomationRequestEvent>("automation-request", (event) => {
+    void listen<AutomationRequestEvent>("automation-request", (event) => {
       if (disposed) return;
 
       let resolution: Record<string, unknown>;
@@ -111,11 +112,23 @@ export function useAutomationBridge({
       void invoke("resolve_automation_request", { resolution }).catch(() => {
         // Rust owns the timeout and late-response cleanup path.
       });
-    });
+    })
+      .then((dispose) => {
+        if (disposed) {
+          dispose();
+          return;
+        }
+        unlisten = dispose;
+        void invoke("set_automation_frontend_ready", { ready: true });
+      })
+      .catch(() => {
+        // The bridge remains not-ready and CLI requests fail explicitly.
+      });
 
     return () => {
       disposed = true;
-      void unlistenPromise.then((unlisten) => unlisten());
+      unlisten?.();
+      void invoke("set_automation_frontend_ready", { ready: false });
     };
   }, [setActiveWorkspaceId, setAttention, setWorkspaces]);
 }
