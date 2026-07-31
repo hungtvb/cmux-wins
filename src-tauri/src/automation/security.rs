@@ -2,7 +2,7 @@
 
 use std::{ffi::c_void, io, mem::size_of, ptr::null_mut};
 use windows::{
-    core::PWSTR,
+    core::{HSTRING, PWSTR},
     Win32::{
         Foundation::{CloseHandle, BOOL, HANDLE, HLOCAL, LocalFree},
         Security::{
@@ -36,12 +36,18 @@ pub struct SecurityDescriptor {
 impl SecurityDescriptor {
     pub fn for_current_user() -> io::Result<(String, Self)> {
         let sid = current_user_sid()?;
-        let sddl = format!("D:P(A;;GA;;;{sid})");
+        let descriptor = Self::for_sid(&sid)?;
+        Ok((sid, descriptor))
+    }
+
+    pub fn for_sid(sid: &str) -> io::Result<Self> {
+        validate_sid(sid)?;
+        let sddl = HSTRING::from(format!("D:P(A;;GA;;;{sid})"));
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
 
         unsafe {
             ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                &windows::core::HSTRING::from(sddl),
+                &sddl,
                 SDDL_REVISION_1,
                 &mut descriptor,
                 None,
@@ -55,13 +61,10 @@ impl SecurityDescriptor {
             bInheritHandle: BOOL(0),
         };
 
-        Ok((
-            sid,
-            Self {
-                descriptor,
-                attributes,
-            },
-        ))
+        Ok(Self {
+            descriptor,
+            attributes,
+        })
     }
 
     pub fn as_raw_attributes(&mut self) -> *mut c_void {
@@ -116,10 +119,19 @@ fn current_user_sid() -> io::Result<String> {
     }
 
     let sid = result?;
-    if !sid.starts_with("S-1-")
-        || !sid
+    validate_sid(&sid)?;
+    Ok(sid)
+}
+
+fn validate_sid(sid: &str) -> io::Result<()> {
+    let suffix = sid.strip_prefix("S-1-").ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "Windows returned an invalid user SID")
+    })?;
+
+    if suffix.is_empty()
+        || !suffix
             .chars()
-            .all(|character| character.is_ascii_digit() || character == 'S' || character == '-')
+            .all(|character| character.is_ascii_digit() || character == '-')
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -127,7 +139,7 @@ fn current_user_sid() -> io::Result<String> {
         ));
     }
 
-    Ok(sid)
+    Ok(())
 }
 
 fn to_io_error(error: windows::core::Error) -> io::Error {
@@ -144,5 +156,12 @@ mod tests {
             SecurityDescriptor::for_current_user().expect("current-user descriptor should build");
         assert!(sid.starts_with("S-1-"));
         assert!(!descriptor.as_raw_attributes().is_null());
+    }
+
+    #[test]
+    fn rejects_non_sid_sddl_input() {
+        let error = SecurityDescriptor::for_sid("S-1-5-21);(A;;GA;;;WD")
+            .expect_err("injected SID text must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 }
