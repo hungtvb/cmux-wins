@@ -127,10 +127,8 @@ jobs:
 
           Compare the result with `SHA256SUMS.txt` before installation.
           '@
-          $releaseNotes
-            .Replace("__VERSION__", $version)
-            .Replace("__COMMIT__", $env:GITHUB_SHA) |
-            Set-Content release-notes.md
+          $renderedNotes = $releaseNotes.Replace("__VERSION__", $version).Replace("__COMMIT__", $env:GITHUB_SHA)
+          $renderedNotes | Set-Content release-notes.md
 
       - name: Upload immutable workflow artifact
         uses: actions/upload-artifact@v4
