@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import type { TerminalOutputEvent } from "../types";
 
 type UseTerminalSessionOptions = {
+  workspaceId: string;
   sessionId: string;
   cwd: string;
   onAttention: (message: string) => void;
@@ -15,6 +16,7 @@ type UseTerminalSessionOptions = {
 const notificationPattern = /\x1b\](?:9|99|777);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 
 export function useTerminalSession({
+  workspaceId,
   sessionId,
   cwd,
   onAttention,
@@ -24,9 +26,7 @@ export function useTerminalSession({
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) {
-      return;
-    }
+    if (!host) return;
 
     const terminal = new Terminal({
       allowProposedApi: false,
@@ -88,9 +88,7 @@ export function useTerminalSession({
 
     const start = async () => {
       unlisten = await listen<TerminalOutputEvent>("terminal-output", (event) => {
-        if (event.payload.sessionId !== sessionId || disposed) {
-          return;
-        }
+        if (event.payload.sessionId !== sessionId || disposed) return;
 
         terminal.write(event.payload.data);
         scanNotifications(event.payload.data);
@@ -102,6 +100,7 @@ export function useTerminalSession({
       }
 
       await invoke("spawn_terminal", {
+        workspaceId,
         sessionId,
         cwd: cwd || null,
         cols: terminal.cols,
@@ -139,16 +138,12 @@ export function useTerminalSession({
     });
 
     const titleDisposable = terminal.onTitleChange((title) => {
-      if (title.trim()) {
-        onTitleChange(title.trim());
-      }
+      if (title.trim()) onTitleChange(title.trim());
     });
 
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
-      if (!started) {
-        return;
-      }
+      if (!started) return;
 
       void invoke("resize_terminal", {
         sessionId,
@@ -167,7 +162,7 @@ export function useTerminalSession({
       terminal.dispose();
       void invoke("close_terminal", { sessionId }).catch(() => undefined);
     };
-  }, [cwd, onAttention, onTitleChange, sessionId]);
+  }, [cwd, onAttention, onTitleChange, sessionId, workspaceId]);
 
   return hostRef;
 }
