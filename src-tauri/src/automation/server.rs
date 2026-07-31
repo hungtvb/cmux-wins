@@ -1,10 +1,11 @@
 #![cfg(windows)]
 
 use serde_json::json;
-use std::{io, process};
+use std::{io, process, time::Duration};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::windows::named_pipe::{NamedPipeServer, ServerOptions},
+    time::timeout,
 };
 
 use super::{
@@ -15,6 +16,9 @@ use super::{
     },
     security::SecurityDescriptor,
 };
+
+const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_REQUESTS_PER_CONNECTION: usize = 128;
 
 pub async fn run() -> io::Result<()> {
     let (sid, mut first_descriptor) = SecurityDescriptor::for_current_user()?;
@@ -108,8 +112,13 @@ async fn handle_client(server: NamedPipeServer, expected_token: &str) -> io::Res
     let (reader, mut writer) = tokio::io::split(server);
     let mut reader = BufReader::new(reader);
 
-    loop {
-        let mut line = match read_request_line(&mut reader).await? {
+    for _ in 0..MAX_REQUESTS_PER_CONNECTION {
+        let request_line = match timeout(CLIENT_IDLE_TIMEOUT, read_request_line(&mut reader)).await {
+            Ok(result) => result?,
+            Err(_) => return Ok(()),
+        };
+
+        let mut line = match request_line {
             RequestLine::Eof => return Ok(()),
             RequestLine::Line(line) => line,
             RequestLine::TooLarge => {
@@ -136,6 +145,8 @@ async fn handle_client(server: NamedPipeServer, expected_token: &str) -> io::Res
         let response = dispatch(&line, expected_token);
         write_response(&mut writer, &response).await?;
     }
+
+    Ok(())
 }
 
 fn dispatch(line: &[u8], expected_token: &str) -> AutomationResponse {
@@ -194,11 +205,10 @@ where
 mod tests {
     use super::*;
     use serde_json::Value;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::{
         io::{AsyncBufReadExt, AsyncWriteExt},
         net::windows::named_pipe::ClientOptions,
-        time::timeout,
     };
 
     const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
