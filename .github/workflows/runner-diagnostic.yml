@@ -1,0 +1,23 @@
+name: Runner Diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/actions-runner-diagnostic
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm Ubuntu runner allocation
+        run: echo "ubuntu runner allocated"
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm Windows runner allocation
+        shell: pwsh
+        run: Write-Output "windows runner allocated"
