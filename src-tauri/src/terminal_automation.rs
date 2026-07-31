@@ -8,9 +8,10 @@ use tokio::{sync::Notify, time::timeout};
 
 pub(crate) const MAX_TRANSCRIPT_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_TERMINAL_RECORDS: usize = 128;
-pub(crate) const MIN_READ_BYTES: usize = 8 * 1024;
-pub(crate) const MAX_READ_BYTES: usize = 32 * 1024;
+pub(crate) const MIN_READ_BYTES: usize = 1024;
+pub(crate) const MAX_READ_BYTES: usize = 8 * 1024;
 pub(crate) const MAX_WAIT_MS: u64 = 30_000;
+const MAX_STORED_CHUNK_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,6 +37,7 @@ pub(crate) struct TerminalReadResult {
     pub(crate) chunks: Vec<TerminalOutputChunk>,
     pub(crate) next_seq: u64,
     pub(crate) earliest_seq: u64,
+    pub(crate) latest_seq: u64,
     pub(crate) dropped: bool,
     pub(crate) has_more: bool,
     pub(crate) status: TerminalLifecycleStatus,
@@ -71,8 +73,15 @@ pub(crate) struct TerminalAutomationStore {
 }
 
 impl TerminalAutomationStore {
-    pub(crate) fn begin_session(&self, session_id: &str, workspace_id: &str) -> u64 {
-        let mut state = self.state.lock().expect("terminal automation store poisoned");
+    pub(crate) fn begin_session(
+        &self,
+        session_id: &str,
+        workspace_id: &str,
+    ) -> Result<u64, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "terminal automation store is poisoned".to_owned())?;
         state.next_generation = state.next_generation.wrapping_add(1).max(1);
         let generation = state.next_generation;
         state.records.insert(
@@ -92,7 +101,7 @@ impl TerminalAutomationStore {
         prune_records(&mut state);
         drop(state);
         self.changed.notify_waiters();
-        generation
+        Ok(generation)
     }
 
     pub(crate) fn record_output(&self, session_id: &str, generation: u64, data: String) {
@@ -111,11 +120,16 @@ impl TerminalAutomationStore {
             return;
         }
 
-        let bytes = data.len();
-        let seq = record.next_seq;
-        record.next_seq = record.next_seq.saturating_add(1);
-        record.total_bytes = record.total_bytes.saturating_add(bytes);
-        record.chunks.push_back(TerminalOutputChunk { seq, data });
+        for segment in split_utf8_chunks(&data, MAX_STORED_CHUNK_BYTES) {
+            let bytes = segment.len();
+            let seq = record.next_seq;
+            record.next_seq = record.next_seq.saturating_add(1);
+            record.total_bytes = record.total_bytes.saturating_add(bytes);
+            record.chunks.push_back(TerminalOutputChunk {
+                seq,
+                data: segment.to_owned(),
+            });
+        }
 
         while record.total_bytes > MAX_TRANSCRIPT_BYTES && record.chunks.len() > 1 {
             if let Some(chunk) = record.chunks.pop_front() {
@@ -173,6 +187,7 @@ impl TerminalAutomationStore {
             .front()
             .map(|chunk| chunk.seq)
             .unwrap_or(record.next_seq);
+        let latest_seq = record.next_seq.saturating_sub(1);
         let dropped = after_seq.saturating_add(1) < earliest_seq;
         let mut chunks = Vec::new();
         let mut used = 0_usize;
@@ -194,7 +209,7 @@ impl TerminalAutomationStore {
         let next_seq = chunks
             .last()
             .map(|chunk| chunk.seq)
-            .unwrap_or_else(|| after_seq.max(earliest_seq.saturating_sub(1)));
+            .unwrap_or_else(|| after_seq.min(latest_seq).max(earliest_seq.saturating_sub(1)));
         let has_more = record.chunks.iter().any(|chunk| chunk.seq > next_seq);
 
         Ok(TerminalReadResult {
@@ -203,6 +218,7 @@ impl TerminalAutomationStore {
             chunks,
             next_seq,
             earliest_seq,
+            latest_seq,
             dropped,
             has_more,
             status: record.status,
@@ -232,6 +248,29 @@ impl TerminalAutomationStore {
     }
 }
 
+fn split_utf8_chunks(value: &str, max_bytes: usize) -> Vec<&str> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+
+    while start < value.len() {
+        let mut end = (start + max_bytes).min(value.len());
+        while end > start && !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end == start {
+            end = value[start..]
+                .char_indices()
+                .nth(1)
+                .map(|(offset, _)| start + offset)
+                .unwrap_or(value.len());
+        }
+        chunks.push(&value[start..end]);
+        start = end;
+    }
+
+    chunks
+}
+
 fn prune_records(state: &mut StoreState) {
     if state.records.len() <= MAX_TERMINAL_RECORDS {
         return;
@@ -243,17 +282,16 @@ fn prune_records(state: &mut StoreState) {
         let Some((session_id, generation)) = state.order.pop_front() else {
             break;
         };
-        let removable = state
-            .records
-            .get(&session_id)
-            .is_some_and(|record| {
-                record.generation == generation
-                    && record.status != TerminalLifecycleStatus::Running
-            });
-        if removable {
-            state.records.remove(&session_id);
-        } else {
-            state.order.push_back((session_id, generation));
+
+        match state.records.get(&session_id) {
+            None => {}
+            Some(record) if record.generation != generation => {}
+            Some(record) if record.status == TerminalLifecycleStatus::Running => {
+                state.order.push_back((session_id, generation));
+            }
+            Some(_) => {
+                state.records.remove(&session_id);
+            }
         }
     }
 }
@@ -265,9 +303,11 @@ mod tests {
     #[test]
     fn transcript_is_cursor_based_and_bounded() {
         let store = TerminalAutomationStore::default();
-        let generation = store.begin_session("pane-1", "workspace-1");
-        for index in 0..40 {
-            store.record_output("pane-1", generation, format!("{index}:{}", "x".repeat(8192)));
+        let generation = store
+            .begin_session("pane-1", "workspace-1")
+            .expect("session should begin");
+        for index in 0..80 {
+            store.record_output("pane-1", generation, format!("{index}:{}", "x".repeat(4096)));
         }
 
         let first = store
@@ -275,6 +315,7 @@ mod tests {
             .expect("snapshot should work");
         assert!(first.dropped);
         assert!(first.earliest_seq > 1);
+        assert!(first.latest_seq >= first.next_seq);
         assert!(!first.chunks.is_empty());
         assert!(first.chunks.iter().map(|chunk| chunk.data.len()).sum::<usize>() <= MAX_READ_BYTES);
 
@@ -285,10 +326,22 @@ mod tests {
     }
 
     #[test]
+    fn chunks_preserve_utf8_boundaries() {
+        let chunks = split_utf8_chunks(&"ế".repeat(5000), MAX_STORED_CHUNK_BYTES);
+        assert!(chunks.len() > 1);
+        assert_eq!(chunks.concat(), "ế".repeat(5000));
+        assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_STORED_CHUNK_BYTES));
+    }
+
+    #[test]
     fn stale_reader_generation_cannot_mutate_new_session() {
         let store = TerminalAutomationStore::default();
-        let old_generation = store.begin_session("pane-1", "workspace-1");
-        let new_generation = store.begin_session("pane-1", "workspace-2");
+        let old_generation = store
+            .begin_session("pane-1", "workspace-1")
+            .expect("session should begin");
+        let new_generation = store
+            .begin_session("pane-1", "workspace-2")
+            .expect("session should restart");
 
         store.record_output("pane-1", old_generation, "stale".to_owned());
         store.finish_session(
@@ -312,7 +365,9 @@ mod tests {
     #[tokio::test]
     async fn long_poll_wakes_on_output() {
         let store = std::sync::Arc::new(TerminalAutomationStore::default());
-        let generation = store.begin_session("pane-1", "workspace-1");
+        let generation = store
+            .begin_session("pane-1", "workspace-1")
+            .expect("session should begin");
         let reader_store = store.clone();
         let reader = tokio::spawn(async move {
             reader_store
