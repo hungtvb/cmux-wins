@@ -9,7 +9,7 @@ on:
 jobs:
   check:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -55,6 +55,30 @@ jobs:
 
       - name: Fail when Rust check failed
         if: steps.cargo-check.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
+
+      - name: Run ConPTY smoke tests
+        id: cargo-test
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          cmd /c "cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture > cargo-test.log 2>&1"
+          $exitCode = $LASTEXITCODE
+          Get-Content cargo-test.log
+          exit $exitCode
+
+      - name: Upload ConPTY smoke test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conpty-smoke-test-log
+          path: cargo-test.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail when ConPTY smoke tests failed
+        if: steps.cargo-test.outcome == 'failure'
         shell: pwsh
         run: exit 1
 
