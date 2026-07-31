@@ -109,6 +109,38 @@ Generated MSI and NSIS installers are written under `src-tauri\target\release\bu
 
 The Windows CI workflow uploads both installers as the `cmux-windows-installers` artifact after the compile checks pass.
 
+## Local Windows verification
+
+When GitHub-hosted runners are unavailable, run the same critical gates on a Windows 11 development machine:
+
+```powershell
+git switch feat/automation-workspaces
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1
+```
+
+This runs:
+
+- frontend reducer tests
+- TypeScript and Vite build
+- Rust `cargo check --all-targets`
+- Rust unit tests
+- real Windows ConPTY integration tests
+- release builds for the desktop app and `cmux-cli.exe`
+
+After dependencies are already installed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1 -SkipNpmInstall
+```
+
+Run the full named-pipe/UI automation smoke as an isolated app session:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1 -AutomationSmoke
+```
+
+The automation smoke starts the release desktop executable, waits for both the pipe and React bridge to become ready, then verifies `ping`, `info`, workspace create/list/close, terminal pane create/close and native browser pane create/close. It refuses to run while another `cmux-wins` process is open and force-stops only the process it started.
+
 ## Local automation CLI
 
 Transport-only health commands are available on `feat/local-automation`. Workspace and pane methods are available on `feat/automation-workspaces`.
