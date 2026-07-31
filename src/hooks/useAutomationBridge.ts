@@ -22,7 +22,6 @@ type AutomationRequestEvent = {
 type UseAutomationBridgeOptions = {
   workspaces: Workspace[];
   activeWorkspaceId: string;
-  attention: Record<string, string>;
   setWorkspaces: Dispatch<SetStateAction<Workspace[]>>;
   setActiveWorkspaceId: Dispatch<SetStateAction<string>>;
   setAttention: Dispatch<SetStateAction<Record<string, string>>>;
@@ -31,7 +30,6 @@ type UseAutomationBridgeOptions = {
 export function useAutomationBridge({
   workspaces,
   activeWorkspaceId,
-  attention,
   setWorkspaces,
   setActiveWorkspaceId,
   setAttention,
@@ -39,7 +37,7 @@ export function useAutomationBridge({
   const stateRef = useRef<WorkspaceAutomationState>({
     workspaces,
     activeWorkspaceId,
-    attention,
+    attention: {},
   });
 
   useEffect(() => {
@@ -51,10 +49,6 @@ export function useAutomationBridge({
   }, [activeWorkspaceId]);
 
   useEffect(() => {
-    stateRef.current = { ...stateRef.current, attention };
-  }, [attention]);
-
-  useEffect(() => {
     let disposed = false;
 
     const unlistenPromise = listen<AutomationRequestEvent>("automation-request", (event) => {
@@ -62,15 +56,39 @@ export function useAutomationBridge({
 
       let resolution: Record<string, unknown>;
       try {
+        const previous = stateRef.current;
         const outcome = applyWorkspaceAutomation(
-          stateRef.current,
+          previous,
           event.payload.method,
           event.payload.params,
         );
         stateRef.current = outcome.state;
         setWorkspaces(outcome.state.workspaces);
         setActiveWorkspaceId(outcome.state.activeWorkspaceId);
-        setAttention(outcome.state.attention);
+
+        if (event.payload.method === "pane.close") {
+          const paneId = event.payload.params.paneId;
+          if (typeof paneId === "string") {
+            setAttention((current) => {
+              const next = { ...current };
+              delete next[paneId];
+              return next;
+            });
+          }
+        } else if (event.payload.method === "workspace.close") {
+          const workspaceId = event.payload.params.workspaceId;
+          const closedWorkspace =
+            typeof workspaceId === "string"
+              ? previous.workspaces.find((workspace) => workspace.id === workspaceId)
+              : undefined;
+          if (closedWorkspace) {
+            setAttention((current) => {
+              const next = { ...current };
+              for (const pane of closedWorkspace.panes) delete next[pane.id];
+              return next;
+            });
+          }
+        }
 
         resolution = {
           commandId: event.payload.commandId,
