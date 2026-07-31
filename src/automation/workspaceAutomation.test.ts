@@ -36,6 +36,16 @@ function ids(...values: string[]) {
   return () => values[index++] ?? `generated-${index}`;
 }
 
+function expectAutomationError(run: () => unknown, code: string) {
+  try {
+    run();
+    throw new Error(`expected automation error: ${code}`);
+  } catch (cause) {
+    expect(cause).toBeInstanceOf(WorkspaceAutomationError);
+    expect((cause as WorkspaceAutomationError).code).toBe(code);
+  }
+}
+
 describe("workspace automation reducer", () => {
   it("lists a bounded serializable workspace snapshot", () => {
     const state = baseState();
@@ -60,7 +70,7 @@ describe("workspace automation reducer", () => {
     );
 
     expect(outcome.state.activeWorkspaceId).toBe("workspace-new");
-    expect(outcome.state.workspaces.at(-1)).toMatchObject({
+    expect(outcome.state.workspaces[outcome.state.workspaces.length - 1]).toMatchObject({
       id: "workspace-new",
       title: "Agent",
       panes: [{ id: "pane-new", kind: "terminal" }],
@@ -95,12 +105,12 @@ describe("workspace automation reducer", () => {
     const state = baseState();
     state.workspaces = [state.workspaces[0]];
 
-    expect(() =>
-      applyWorkspaceAutomation(state, "workspace.close", { workspaceId: "workspace-1" }),
-    ).toThrowError(
-      expect.objectContaining<Partial<WorkspaceAutomationError>>({
-        code: "LAST_WORKSPACE_PROTECTED",
-      }),
+    expectAutomationError(
+      () =>
+        applyWorkspaceAutomation(state, "workspace.close", {
+          workspaceId: "workspace-1",
+        }),
+      "LAST_WORKSPACE_PROTECTED",
     );
   });
 
@@ -143,15 +153,14 @@ describe("workspace automation reducer", () => {
   it("protects the final pane and preserves state on failure", () => {
     const state = baseState();
 
-    try {
-      applyWorkspaceAutomation(state, "pane.close", {
-        workspaceId: "workspace-2",
-        paneId: "pane-3",
-      });
-      throw new Error("expected reducer to reject final pane close");
-    } catch (cause) {
-      expect(cause).toMatchObject({ code: "LAST_PANE_PROTECTED" });
-      expect(state.workspaces[1].panes).toHaveLength(1);
-    }
+    expectAutomationError(
+      () =>
+        applyWorkspaceAutomation(state, "pane.close", {
+          workspaceId: "workspace-2",
+          paneId: "pane-3",
+        }),
+      "LAST_PANE_PROTECTED",
+    );
+    expect(state.workspaces[1].panes).toHaveLength(1);
   });
 });
