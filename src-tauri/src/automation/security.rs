@@ -97,7 +97,11 @@ fn current_user_sid() -> io::Result<String> {
         ));
     }
 
-    let mut buffer = vec![0_u8; required as usize];
+    // TOKEN_USER contains pointers and must be read from storage aligned for
+    // pointer-sized values. Vec<u8> only guarantees byte alignment.
+    let word_size = size_of::<usize>();
+    let word_count = (required as usize + word_size - 1) / word_size;
+    let mut buffer = vec![0_usize; word_count];
     unsafe {
         GetTokenInformation(
             token.0,
