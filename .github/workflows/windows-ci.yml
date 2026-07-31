@@ -9,7 +9,7 @@ on:
 jobs:
   check:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -55,6 +55,31 @@ jobs:
 
       - name: Fail when Rust check failed
         if: steps.cargo-check.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
+
+      - name: Run Rust unit tests
+        id: cargo-unit-test
+        continue-on-error: true
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          cmd /c "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1 > cargo-unit-test.log 2>&1"
+          $exitCode = $LASTEXITCODE
+          Get-Content cargo-unit-test.log
+          exit $exitCode
+
+      - name: Upload Rust unit test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-unit-test-log
+          path: cargo-unit-test.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail when Rust unit tests failed
+        if: steps.cargo-unit-test.outcome == 'failure'
         shell: pwsh
         run: exit 1
 
