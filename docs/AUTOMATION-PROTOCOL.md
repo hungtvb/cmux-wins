@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`cmux-cli` and local AI tools communicate with the running desktop app through a Windows named pipe. The first slice intentionally exposes only read-only health and identity methods. Workspace and terminal mutation commands will be added only after the transport and authorization boundary are proven.
+`cmux-cli` and local AI tools communicate with the running desktop app through a Windows named pipe. Protocol v1 exposes health, identity, workspace lifecycle and pane lifecycle methods through explicit schemas. Terminal input/output remains a later, separately reviewed slice.
 
 ## Security boundary
 
@@ -11,7 +11,9 @@
 - The pipe name is user-specific and protocol-versioned.
 - Every request must include the random token stored in `%LOCALAPPDATA%\cmux-windows\automation-v1.json`.
 - The first server instance flag prevents a second process from impersonating the cmux endpoint while the real app is running.
-- Requests are bounded to 64 KiB and malformed input closes the connection after a structured error.
+- Requests and responses are bounded to 64 KiB.
+- Idle clients are disconnected after 30 seconds.
+- A connection is limited to 128 requests.
 - Protocol methods are allowlisted. There is no generic shell execution method.
 
 The token is defense in depth and accidental-client protection. The current-user DACL is the primary local authorization boundary.
@@ -24,7 +26,7 @@ Pipe name format:
 \\.\pipe\cmux-windows-v1-<current-user-sid>
 ```
 
-Messages are UTF-8 JSON objects separated by a newline. A connection may send multiple sequential requests.
+Messages are UTF-8 JSON objects separated by a newline. A connection may send multiple sequential requests within the connection limits.
 
 ## Request
 
@@ -33,8 +35,12 @@ Messages are UTF-8 JSON objects separated by a newline. A connection may send mu
   "version": 1,
   "id": "client-generated-id",
   "token": "64-character-hex-token",
-  "method": "ping",
-  "params": {}
+  "method": "workspace.create",
+  "params": {
+    "title": "Agent work",
+    "cwd": "C:\\code\\project",
+    "activate": true
+  }
 }
 ```
 
@@ -46,6 +52,8 @@ Required fields:
 - `method`: allowlisted method name
 - `params`: JSON object; defaults to `{}`
 
+Unknown fields in mutation method params are rejected.
+
 ## Response
 
 Success:
@@ -56,7 +64,9 @@ Success:
   "id": "client-generated-id",
   "ok": true,
   "result": {
-    "pong": true
+    "workspaceId": "generated-id",
+    "paneId": "generated-id",
+    "active": true
   }
 }
 ```
@@ -69,21 +79,124 @@ Failure:
   "id": "client-generated-id",
   "ok": false,
   "error": {
-    "code": "METHOD_NOT_FOUND",
-    "message": "unsupported automation method"
+    "code": "WORKSPACE_NOT_FOUND",
+    "message": "workspace not found: generated-id"
   }
 }
 ```
 
-## Methods in slice 1
+## Read-only methods
 
 ### `ping`
+
+Params: `{}`
 
 Returns protocol liveness.
 
 ### `app.info`
 
+Params: `{}`
+
 Returns the app version, protocol version and desktop process ID.
+
+### `workspace.list`
+
+Params: `{}`
+
+Returns the active workspace ID and a serializable snapshot of workspaces and panes. Runtime-only PTY handles, browser handles and attention payloads are not exposed.
+
+## Workspace methods
+
+### `workspace.create`
+
+```json
+{
+  "title": "Agent work",
+  "cwd": "C:\\code\\project",
+  "activate": true
+}
+```
+
+- `title`: required, 1–120 printable characters
+- `cwd`: optional, maximum 2,048 characters
+- `activate`: optional, defaults to `true`
+
+A new workspace starts with one terminal pane.
+
+### `workspace.select`
+
+```json
+{ "workspaceId": "workspace-id" }
+```
+
+Selects the workspace and clears its unread marker.
+
+### `workspace.close`
+
+```json
+{ "workspaceId": "workspace-id" }
+```
+
+Closes the workspace. The final workspace is protected and returns `LAST_WORKSPACE_PROTECTED` rather than silently creating a replacement.
+
+## Pane methods
+
+### `pane.createTerminal`
+
+```json
+{ "workspaceId": "workspace-id" }
+```
+
+Creates one terminal pane in the target workspace.
+
+### `pane.createBrowser`
+
+```json
+{
+  "workspaceId": "workspace-id",
+  "url": "https://example.com/"
+}
+```
+
+`url` is optional and defaults to GitHub. Only HTTP and HTTPS URLs are accepted.
+
+### `pane.close`
+
+```json
+{
+  "workspaceId": "workspace-id",
+  "paneId": "pane-id"
+}
+```
+
+Closes one pane. The final pane in a workspace is protected and returns `LAST_PANE_PROTECTED`.
+
+## Rust/UI bridge
+
+Workspace state remains owned by React. Rust validates and canonicalizes method params, emits a private local Tauri event and waits for a matching UI acknowledgement.
+
+- UI readiness is registered only after the listener is mounted.
+- Requests fail with `UI_NOT_READY` before mount or during reload.
+- A bridge request times out after five seconds.
+- Unmounting the UI drains pending requests instead of leaving clients blocked.
+- Late or duplicate UI responses are ignored.
+
+## CLI mapping
+
+```powershell
+cmux-cli ping
+cmux-cli info
+cmux-cli workspace list
+cmux-cli workspace create "Agent work" --cwd C:\code\project
+cmux-cli workspace create "Background" --no-activate
+cmux-cli workspace select <workspace-id>
+cmux-cli workspace close <workspace-id>
+cmux-cli pane terminal <workspace-id>
+cmux-cli pane browser <workspace-id> https://example.com
+cmux-cli pane close <workspace-id> <pane-id>
+```
+
+The CLI does not provide a raw-method escape hatch.
 
 ## Error codes
 
@@ -93,19 +206,22 @@ Returns the app version, protocol version and desktop process ID.
 - `UNAUTHORIZED`
 - `METHOD_NOT_FOUND`
 - `REQUEST_TOO_LARGE`
+- `WORKSPACE_NOT_FOUND`
+- `PANE_NOT_FOUND`
+- `LAST_WORKSPACE_PROTECTED`
+- `LAST_PANE_PROTECTED`
+- `UI_NOT_READY`
+- `UI_TIMEOUT`
+- `UI_ERROR`
 - `INTERNAL_ERROR`
 
-## Planned slice 2
+## Deferred methods
 
-After the transport is validated on Windows 11:
+The following require a separate security and backpressure review:
 
-- `workspace.list`
-- `workspace.create`
-- `workspace.select`
-- `workspace.close`
-- `pane.createTerminal`
-- `pane.createBrowser`
 - `terminal.write`
-- bounded terminal output and lifecycle events
+- bounded terminal output subscriptions
+- terminal lifecycle events
+- browser script execution or DOM automation
 
-Mutation methods will use explicit schemas and will not accept arbitrary backend commands.
+No future method may accept an arbitrary backend command or unrestricted shell execution payload.
