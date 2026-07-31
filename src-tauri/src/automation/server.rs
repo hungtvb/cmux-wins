@@ -226,12 +226,25 @@ async fn dispatch(
     }
 }
 
+fn encode_response(response: &AutomationResponse) -> io::Result<Vec<u8>> {
+    let mut encoded = serde_json::to_vec(response).map_err(io::Error::other)?;
+    if encoded.len() + 1 > MAX_REQUEST_BYTES {
+        let fallback = AutomationResponse::failure(
+            response.id.clone(),
+            "RESPONSE_TOO_LARGE",
+            format!("response exceeds {MAX_REQUEST_BYTES} bytes"),
+        );
+        encoded = serde_json::to_vec(&fallback).map_err(io::Error::other)?;
+    }
+    encoded.push(b'\n');
+    Ok(encoded)
+}
+
 async fn write_response<W>(writer: &mut W, response: &AutomationResponse) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {
-    let mut encoded = serde_json::to_vec(response).map_err(io::Error::other)?;
-    encoded.push(b'\n');
+    let encoded = encode_response(response)?;
     writer.write_all(&encoded).await?;
     writer.flush().await
 }
@@ -290,6 +303,28 @@ mod tests {
         let response = dispatch(b"{not-json", TOKEN, None).await;
         assert!(!response.ok);
         assert_eq!(response.error.expect("missing error").code, "INVALID_JSON");
+    }
+
+    #[test]
+    fn oversized_response_is_replaced_with_bounded_error() {
+        let response = AutomationResponse::success(
+            "request-1",
+            json!({ "value": "x".repeat(MAX_REQUEST_BYTES) }),
+        );
+        let encoded = encode_response(&response).expect("response should encode");
+        assert!(encoded.len() <= MAX_REQUEST_BYTES);
+
+        let fallback: AutomationResponse = serde_json::from_slice(
+            encoded
+                .strip_suffix(b"\n")
+                .expect("encoded response should end with newline"),
+        )
+        .expect("fallback should be valid JSON");
+        assert!(!fallback.ok);
+        assert_eq!(
+            fallback.error.expect("missing error").code,
+            "RESPONSE_TOO_LARGE"
+        );
     }
 
     #[tokio::test]
