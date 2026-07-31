@@ -4,9 +4,22 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-release.yml"
+      - "package.json"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/tauri.conf.json"
+      - "src-tauri/icons/**"
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   release:
@@ -14,12 +27,13 @@ jobs:
     timeout-minutes: 50
 
     steps:
-      - name: Checkout tagged commit
+      - name: Checkout release source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Require tag commit on main
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           $branches = git branch -r --contains $env:GITHUB_SHA
@@ -44,20 +58,32 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          $tagVersion = $tag -replace '^v', ''
           $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           $cargoMetadata = cargo metadata --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
           $cargoVersion = $cargoMetadata.packages[0].version
-
           $versions = @($packageVersion, $tauriVersion, $cargoVersion) | Select-Object -Unique
-          if ($versions.Count -ne 1 -or $versions[0] -ne $tagVersion) {
-            throw "Version mismatch. tag=$tagVersion package=$packageVersion tauri=$tauriVersion cargo=$cargoVersion"
+
+          if ($versions.Count -ne 1) {
+            throw "Version mismatch. package=$packageVersion tauri=$tauriVersion cargo=$cargoVersion"
           }
 
-          "version=$tagVersion" >> $env:GITHUB_OUTPUT
+          $isTag = $env:GITHUB_REF -like "refs/tags/v*"
+          if ($isTag) {
+            $tag = $env:GITHUB_REF_NAME
+            $tagVersion = $tag -replace '^v', ''
+            if ($tagVersion -ne $packageVersion) {
+              throw "Tag/config version mismatch. tag=$tagVersion package=$packageVersion"
+            }
+            $publish = "true"
+          } else {
+            $tag = "dry-run-v$packageVersion"
+            $publish = "false"
+          }
+
+          "version=$packageVersion" >> $env:GITHUB_OUTPUT
           "tag=$tag" >> $env:GITHUB_OUTPUT
+          "publish=$publish" >> $env:GITHUB_OUTPUT
 
       - name: Install frontend dependencies
         run: npm install
@@ -93,6 +119,7 @@ jobs:
             commit = $env:GITHUB_SHA
             architecture = "x64"
             runner = $env:RUNNER_IMAGE
+            publish = "${{ steps.version.outputs.publish }}" -eq "true"
             createdAtUtc = [DateTime]::UtcNow.ToString("o")
           } | ConvertTo-Json | Set-Content release-assets/build-metadata.json
 
@@ -133,12 +160,13 @@ jobs:
       - name: Upload immutable workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cmux-windows-${{ steps.version.outputs.version }}-x64
+          name: cmux-windows-${{ steps.version.outputs.version }}-x64-${{ steps.version.outputs.publish == 'true' && 'release' || 'dry-run' }}
           path: release-assets/*
           if-no-files-found: error
           retention-days: 30
 
       - name: Create or update GitHub Release
+        if: steps.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
