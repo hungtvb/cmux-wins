@@ -3,7 +3,7 @@
 use serde_json::json;
 use std::{io, process};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::windows::named_pipe::{NamedPipeServer, ServerOptions},
 };
 
@@ -67,31 +67,69 @@ fn create_server_instance(
     unsafe { options.create_with_security_attributes_raw(pipe_name, security_attributes) }
 }
 
+enum RequestLine {
+    Eof,
+    Line(Vec<u8>),
+    TooLarge,
+}
+
+async fn read_request_line<R>(reader: &mut R) -> io::Result<RequestLine>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut line = Vec::new();
+
+    loop {
+        let buffer = reader.fill_buf().await?;
+        if buffer.is_empty() {
+            return if line.is_empty() {
+                Ok(RequestLine::Eof)
+            } else {
+                Ok(RequestLine::Line(line))
+            };
+        }
+
+        let newline = buffer.iter().position(|value| *value == b'\n');
+        let take = newline.map_or(buffer.len(), |index| index + 1);
+        if line.len() + take > MAX_REQUEST_BYTES {
+            reader.consume(take);
+            return Ok(RequestLine::TooLarge);
+        }
+
+        line.extend_from_slice(&buffer[..take]);
+        reader.consume(take);
+        if newline.is_some() {
+            return Ok(RequestLine::Line(line));
+        }
+    }
+}
+
 async fn handle_client(server: NamedPipeServer, expected_token: &str) -> io::Result<()> {
     let (reader, mut writer) = tokio::io::split(server);
     let mut reader = BufReader::new(reader);
 
     loop {
-        let mut line = Vec::new();
-        let read = reader.read_until(b'\n', &mut line).await?;
-        if read == 0 {
-            return Ok(());
-        }
+        let mut line = match read_request_line(&mut reader).await? {
+            RequestLine::Eof => return Ok(()),
+            RequestLine::Line(line) => line,
+            RequestLine::TooLarge => {
+                write_response(
+                    &mut writer,
+                    &AutomationResponse::failure(
+                        "",
+                        "REQUEST_TOO_LARGE",
+                        format!("request exceeds {MAX_REQUEST_BYTES} bytes"),
+                    ),
+                )
+                .await?;
+                return Ok(());
+            }
+        };
 
-        if line.len() > MAX_REQUEST_BYTES {
-            write_response(
-                &mut writer,
-                &AutomationResponse::failure(
-                    "",
-                    "REQUEST_TOO_LARGE",
-                    format!("request exceeds {MAX_REQUEST_BYTES} bytes"),
-                ),
-            )
-            .await?;
-            return Ok(());
-        }
-
-        while matches!(line.last(), Some(b'\n' | b'\r')) {
+        while line
+            .last()
+            .is_some_and(|value| matches!(*value, b'\n' | b'\r'))
+        {
             line.pop();
         }
 
@@ -144,7 +182,7 @@ fn dispatch(line: &[u8], expected_token: &str) -> AutomationResponse {
 
 async fn write_response<W>(writer: &mut W, response: &AutomationResponse) -> io::Result<()>
 where
-    W: AsyncWriteExt + Unpin,
+    W: AsyncWrite + Unpin,
 {
     let mut encoded = serde_json::to_vec(response).map_err(io::Error::other)?;
     encoded.push(b'\n');
@@ -156,6 +194,12 @@ where
 mod tests {
     use super::*;
     use serde_json::Value;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use tokio::{
+        io::{AsyncBufReadExt, AsyncWriteExt},
+        net::windows::named_pipe::ClientOptions,
+        time::timeout,
+    };
 
     const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -201,5 +245,57 @@ mod tests {
         let response = dispatch(b"{not-json", TOKEN);
         assert!(!response.ok);
         assert_eq!(response.error.expect("missing error").code, "INVALID_JSON");
+    }
+
+    #[tokio::test]
+    async fn current_user_named_pipe_round_trip_ping() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is before Unix epoch")
+            .as_nanos();
+        let pipe_name = format!(r"\\.\pipe\cmux-automation-test-{}-{nanos}", process::id());
+        let (_, mut descriptor) =
+            SecurityDescriptor::for_current_user().expect("descriptor should build");
+        let server = create_server_instance(
+            &pipe_name,
+            true,
+            descriptor.as_raw_attributes(),
+        )
+        .expect("server pipe should be created");
+        drop(descriptor);
+
+        let server_task = tokio::spawn(async move {
+            server.connect().await.expect("server should connect");
+            handle_client(server, TOKEN)
+                .await
+                .expect("server should handle client");
+        });
+
+        let mut client = ClientOptions::new()
+            .open(&pipe_name)
+            .expect("client should open current-user pipe");
+        let mut encoded = request("ping", TOKEN);
+        encoded.push(b'\n');
+        client
+            .write_all(&encoded)
+            .await
+            .expect("client should write request");
+        client.flush().await.expect("client should flush request");
+
+        let mut reader = BufReader::new(client);
+        let mut line = Vec::new();
+        timeout(Duration::from_secs(5), reader.read_until(b'\n', &mut line))
+            .await
+            .expect("response timed out")
+            .expect("response read failed");
+        let response: AutomationResponse =
+            serde_json::from_slice(&line).expect("response should be valid JSON");
+        assert!(response.ok);
+
+        drop(reader);
+        timeout(Duration::from_secs(5), server_task)
+            .await
+            .expect("server task did not stop")
+            .expect("server task panicked");
     }
 }
