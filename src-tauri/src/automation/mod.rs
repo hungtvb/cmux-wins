@@ -1,5 +1,7 @@
 pub mod bridge;
 #[cfg(windows)]
+mod cli_parser;
+#[cfg(windows)]
 pub mod client;
 mod config;
 mod methods;
@@ -9,6 +11,8 @@ mod security;
 #[cfg(windows)]
 mod server;
 mod terminal_methods;
+#[cfg(windows)]
+mod terminal_runner;
 
 #[cfg(windows)]
 pub fn start_server(app: tauri::AppHandle) {
