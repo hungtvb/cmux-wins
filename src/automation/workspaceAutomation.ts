@@ -1,4 +1,8 @@
-import type { Pane, Workspace } from "../types";
+import type {
+  BrowserPaneModel,
+  TerminalPaneModel,
+  Workspace,
+} from "../types";
 
 const DEFAULT_BROWSER_URL = "https://github.com/";
 
@@ -24,7 +28,7 @@ export class WorkspaceAutomationError extends Error {
 
 type IdFactory = () => string;
 
-function createTerminalPane(nextId: IdFactory): Pane {
+function createTerminalPane(nextId: IdFactory): TerminalPaneModel {
   return {
     id: nextId(),
     kind: "terminal",
@@ -32,7 +36,10 @@ function createTerminalPane(nextId: IdFactory): Pane {
   };
 }
 
-function createBrowserPane(nextId: IdFactory, url = DEFAULT_BROWSER_URL): Pane {
+function createBrowserPane(
+  nextId: IdFactory,
+  url = DEFAULT_BROWSER_URL,
+): BrowserPaneModel {
   return {
     id: nextId(),
     kind: "browser",
