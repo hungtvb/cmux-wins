@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     io::Read,
     path::{Path, PathBuf},
@@ -10,7 +10,7 @@ use wait_timeout::ChildExt;
 const LOCAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const NETWORK_COMMAND_TIMEOUT: Duration = Duration::from_secs(4);
 
-#[derive(Clone, Default, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestMetadata {
     pub number: u64,
