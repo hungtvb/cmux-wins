@@ -61,9 +61,10 @@ jobs:
       - name: Run ConPTY smoke tests
         id: cargo-test
         continue-on-error: true
+        timeout-minutes: 12
         shell: pwsh
         run: |
-          cmd /c "cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture > cargo-test.log 2>&1"
+          cmd /c "cargo test --manifest-path src-tauri/Cargo.toml --test conpty_smoke -- --nocapture --test-threads=1 > cargo-test.log 2>&1"
           $exitCode = $LASTEXITCODE
           Get-Content cargo-test.log
           exit $exitCode
