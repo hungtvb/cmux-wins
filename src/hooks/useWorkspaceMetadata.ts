@@ -4,6 +4,11 @@ import type { Workspace, WorkspaceMetadata } from "../types";
 
 const REFRESH_INTERVAL_MS = 15_000;
 
+type WorkspaceMetadataEntry = {
+  workspaceId: string;
+  metadata: WorkspaceMetadata;
+};
+
 export function useWorkspaceMetadata(workspaces: Workspace[]) {
   const [metadataByWorkspace, setMetadataByWorkspace] = useState<
     Record<string, WorkspaceMetadata | undefined>
@@ -15,7 +20,7 @@ export function useWorkspaceMetadata(workspaces: Workspace[]) {
   );
 
   useEffect(() => {
-    const targets = workspaces.map(({ id, cwd }) => ({ id, cwd }));
+    const requests = workspaces.map(({ id, cwd }) => ({ workspaceId: id, cwd }));
     let disposed = false;
     let refreshing = false;
 
@@ -24,22 +29,18 @@ export function useWorkspaceMetadata(workspaces: Workspace[]) {
       refreshing = true;
 
       try {
-        const entries = await Promise.all(
-          targets.map(async ({ id, cwd }) => {
-            if (!cwd.trim()) return [id, undefined] as const;
-
-            try {
-              const metadata = await invoke<WorkspaceMetadata>("get_workspace_metadata", { cwd });
-              return [id, metadata] as const;
-            } catch {
-              return [id, undefined] as const;
-            }
-          }),
-        );
+        const entries = await invoke<WorkspaceMetadataEntry[]>("get_workspace_metadata_batch", {
+          requests,
+        });
 
         if (!disposed) {
-          setMetadataByWorkspace(Object.fromEntries(entries));
+          setMetadataByWorkspace(
+            Object.fromEntries(entries.map(({ workspaceId, metadata }) => [workspaceId, metadata])),
+          );
         }
+      } catch {
+        // Keep the last successful snapshot. Metadata is optional and must not
+        // interrupt terminal input when Git, gh, CIM or networking APIs fail.
       } finally {
         refreshing = false;
       }
