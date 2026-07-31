@@ -5,5 +5,6 @@ import App from "./App";
 import "./styles.css";
 import "./workspace-surfaces.css";
 import "./workspace-controls.css";
+import "./browser-pane.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
