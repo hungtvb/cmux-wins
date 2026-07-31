@@ -153,7 +153,7 @@ pub(crate) fn spawn_terminal(
 
     let generation = state
         .terminal_automation
-        .begin_session(&session_id, &workspace_id);
+        .begin_session(&session_id, &workspace_id)?;
     let session = Arc::new(PtySession {
         workspace_id,
         process_id,
