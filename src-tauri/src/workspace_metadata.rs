@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, HashSet, VecDeque},
     io::Read,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -9,7 +10,22 @@ use std::{
 
 const LOCAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const NETWORK_COMMAND_TIMEOUT: Duration = Duration::from_secs(4);
+const PROCESS_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
 const TERMINATION_GRACE: Duration = Duration::from_millis(500);
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMetadataRequest {
+    pub workspace_id: String,
+    pub cwd: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceMetadataEntry {
+    pub workspace_id: String,
+    pub metadata: WorkspaceMetadata,
+}
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +48,29 @@ pub struct WorkspaceMetadata {
     pub pull_request: Option<PullRequestMetadata>,
     pub listening_ports: Vec<u16>,
     pub available: bool,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ProcessSnapshot {
+    #[serde(default)]
+    processes: Vec<ProcessRecord>,
+    #[serde(default)]
+    listeners: Vec<ListenerRecord>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ProcessRecord {
+    process_id: u32,
+    parent_process_id: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct ListenerRecord {
+    owning_process: u32,
+    local_port: u16,
 }
 
 fn terminate_bounded(child: &mut Child) {
@@ -78,6 +117,74 @@ fn run_bounded(
     let mut output = String::new();
     child.stdout.take()?.read_to_string(&mut output).ok()?;
     status.success().then(|| output.trim().to_owned())
+}
+
+fn inspect_process_snapshot() -> Option<ProcessSnapshot> {
+    #[cfg(not(windows))]
+    {
+        None
+    }
+
+    #[cfg(windows)]
+    {
+        const SCRIPT: &str = r#"
+$ErrorActionPreference = 'Stop'
+$processes = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId)
+$listeners = @(Get-NetTCPConnection -State Listen | Select-Object OwningProcess, LocalPort)
+[PSCustomObject]@{ Processes = $processes; Listeners = $listeners } |
+  ConvertTo-Json -Compress -Depth 4
+"#;
+
+        run_bounded(
+            "powershell.exe",
+            &["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", SCRIPT],
+            &std::env::temp_dir(),
+            PROCESS_SNAPSHOT_TIMEOUT,
+        )
+        .and_then(|value| serde_json::from_str::<ProcessSnapshot>(&value).ok())
+    }
+}
+
+fn ports_by_workspace(
+    snapshot: &ProcessSnapshot,
+    roots_by_workspace: &HashMap<String, Vec<u32>>,
+) -> HashMap<String, Vec<u16>> {
+    let mut children_by_parent: HashMap<u32, Vec<u32>> = HashMap::new();
+    for process in &snapshot.processes {
+        children_by_parent
+            .entry(process.parent_process_id)
+            .or_default()
+            .push(process.process_id);
+    }
+
+    roots_by_workspace
+        .iter()
+        .map(|(workspace_id, roots)| {
+            let mut owned_processes = HashSet::new();
+            let mut queue = VecDeque::from(roots.clone());
+
+            while let Some(process_id) = queue.pop_front() {
+                if !owned_processes.insert(process_id) {
+                    continue;
+                }
+
+                if let Some(children) = children_by_parent.get(&process_id) {
+                    queue.extend(children.iter().copied());
+                }
+            }
+
+            let mut ports = snapshot
+                .listeners
+                .iter()
+                .filter(|listener| owned_processes.contains(&listener.owning_process))
+                .map(|listener| listener.local_port)
+                .collect::<Vec<_>>();
+            ports.sort_unstable();
+            ports.dedup();
+
+            (workspace_id.clone(), ports)
+        })
+        .collect()
 }
 
 fn inspect_git(cwd: &Path, resolve_pull_request: bool) -> WorkspaceMetadata {
@@ -158,20 +265,43 @@ fn inspect_git(cwd: &Path, resolve_pull_request: bool) -> WorkspaceMetadata {
     }
 }
 
-#[tauri::command]
-pub async fn get_workspace_metadata(cwd: String) -> Result<WorkspaceMetadata, String> {
-    if cwd.trim().is_empty() {
-        return Ok(WorkspaceMetadata::default());
-    }
+pub async fn inspect_workspace_metadata_batch(
+    requests: Vec<WorkspaceMetadataRequest>,
+    roots_by_workspace: HashMap<String, Vec<u32>>,
+) -> Result<Vec<WorkspaceMetadataEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let port_map = inspect_process_snapshot()
+            .map(|snapshot| ports_by_workspace(&snapshot, &roots_by_workspace))
+            .unwrap_or_default();
 
-    let path = PathBuf::from(cwd);
-    if !path.is_dir() {
-        return Ok(WorkspaceMetadata::default());
-    }
+        requests
+            .into_iter()
+            .map(|request| {
+                let mut metadata = if request.cwd.trim().is_empty() {
+                    WorkspaceMetadata::default()
+                } else {
+                    let path = PathBuf::from(&request.cwd);
+                    if path.is_dir() {
+                        inspect_git(&path, true)
+                    } else {
+                        WorkspaceMetadata::default()
+                    }
+                };
 
-    tauri::async_runtime::spawn_blocking(move || inspect_git(&path, true))
-        .await
-        .map_err(|error| format!("workspace metadata task failed: {error}"))
+                metadata.listening_ports = port_map
+                    .get(&request.workspace_id)
+                    .cloned()
+                    .unwrap_or_default();
+
+                WorkspaceMetadataEntry {
+                    workspace_id: request.workspace_id,
+                    metadata,
+                }
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| format!("workspace metadata task failed: {error}"))
 }
 
 #[cfg(test)]
@@ -214,6 +344,44 @@ mod tests {
         git(&repository, &["commit", "-m", "initial"]);
         git(&repository, &["checkout", "-b", "feature/metadata"]);
         repository
+    }
+
+    #[test]
+    fn maps_only_descendant_listener_ports_to_a_workspace() {
+        let snapshot = ProcessSnapshot {
+            processes: vec![
+                ProcessRecord {
+                    process_id: 20,
+                    parent_process_id: 10,
+                },
+                ProcessRecord {
+                    process_id: 30,
+                    parent_process_id: 20,
+                },
+                ProcessRecord {
+                    process_id: 99,
+                    parent_process_id: 1,
+                },
+            ],
+            listeners: vec![
+                ListenerRecord {
+                    owning_process: 30,
+                    local_port: 3000,
+                },
+                ListenerRecord {
+                    owning_process: 20,
+                    local_port: 5173,
+                },
+                ListenerRecord {
+                    owning_process: 99,
+                    local_port: 8080,
+                },
+            ],
+        };
+        let roots = HashMap::from([("workspace-a".to_owned(), vec![10])]);
+
+        let result = ports_by_workspace(&snapshot, &roots);
+        assert_eq!(result.get("workspace-a"), Some(&vec![3000, 5173]));
     }
 
     #[test]
