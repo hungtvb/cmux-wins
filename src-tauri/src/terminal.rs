@@ -190,7 +190,7 @@ pub(crate) fn spawn_terminal(
         &app,
         "terminal.started",
         json!({
-            "sessionId": session_id,
+            "sessionId": session_id.clone(),
             "workspaceId": started_workspace_id,
             "generation": generation,
             "processId": process_id,
@@ -257,8 +257,8 @@ pub(crate) fn spawn_terminal(
                 &app,
                 "terminal.error",
                 json!({
-                    "sessionId": session_id,
-                    "workspaceId": session.workspace_id,
+                    "sessionId": session_id.clone(),
+                    "workspaceId": session.workspace_id.clone(),
                     "generation": session.generation,
                     "error": error,
                 }),
@@ -285,8 +285,8 @@ pub(crate) fn spawn_terminal(
                     &app,
                     "terminal.exited",
                     json!({
-                        "sessionId": session_id,
-                        "workspaceId": session.workspace_id,
+                        "sessionId": session_id.clone(),
+                        "workspaceId": session.workspace_id.clone(),
                         "generation": session.generation,
                         "exitCode": exit_code,
                     }),
@@ -305,8 +305,8 @@ pub(crate) fn spawn_terminal(
                     &app,
                     "terminal.error",
                     json!({
-                        "sessionId": session_id,
-                        "workspaceId": session.workspace_id,
+                        "sessionId": session_id.clone(),
+                        "workspaceId": session.workspace_id.clone(),
                         "generation": session.generation,
                         "error": message,
                     }),
@@ -382,7 +382,7 @@ pub(crate) fn close_terminal(
             "terminal.closed",
             json!({
                 "sessionId": session_id,
-                "workspaceId": session.workspace_id,
+                "workspaceId": session.workspace_id.clone(),
                 "generation": session.generation,
             }),
         );
