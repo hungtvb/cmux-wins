@@ -2,9 +2,9 @@ name: Windows CI
 
 on:
   push:
-    branches: [main, feat/windows-mvp]
+    branches: [main, "feat/**"]
   pull_request:
-    branches: [main]
+    branches: [main, feat/windows-mvp]
 
 jobs:
   check:
