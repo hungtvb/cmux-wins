@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserPane } from "./components/BrowserPane";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
+import { useAutomationBridge } from "./hooks/useAutomationBridge";
 import { useWorkspaceMetadata } from "./hooks/useWorkspaceMetadata";
 import type { Pane, Workspace } from "./types";
 
@@ -80,6 +81,14 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const metadataByWorkspace = useWorkspaceMetadata(workspaces, activeWorkspaceId);
+
+  useAutomationBridge({
+    workspaces,
+    activeWorkspaceId,
+    setWorkspaces,
+    setActiveWorkspaceId,
+    setAttention,
+  });
 
   const activeWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0],
