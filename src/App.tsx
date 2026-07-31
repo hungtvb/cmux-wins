@@ -1,14 +1,28 @@
-import { BellOff, Columns2, FolderPlus, PanelLeftClose, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  BellOff,
+  Columns2,
+  FolderPlus,
+  Globe2,
+  PanelLeftClose,
+  Trash2,
+} from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BrowserPane } from "./components/BrowserPane";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import type { Pane, Workspace } from "./types";
 
-const STORAGE_KEY = "cmux-wins.workspaces.v1";
+const STORAGE_KEY = "cmux-wins.workspaces.v2";
+const LEGACY_STORAGE_KEY = "cmux-wins.workspaces.v1";
+const DEFAULT_BROWSER_URL = "https://github.com";
 
-function createPane(title = "PowerShell"): Pane {
-  return { id: crypto.randomUUID(), title };
+function createTerminalPane(title = "PowerShell"): Pane {
+  return { id: crypto.randomUUID(), kind: "terminal", title };
+}
+
+function createBrowserPane(url = DEFAULT_BROWSER_URL): Pane {
+  return { id: crypto.randomUUID(), kind: "browser", title: "Browser", url };
 }
 
 function createWorkspace(title = "Workspace", cwd = ""): Workspace {
@@ -16,25 +30,43 @@ function createWorkspace(title = "Workspace", cwd = ""): Workspace {
     id: crypto.randomUUID(),
     title,
     cwd,
-    panes: [createPane()],
+    panes: [createTerminalPane()],
     unread: false,
+  };
+}
+
+function migratePane(value: unknown): Pane {
+  const pane = value as Partial<Pane> & { url?: unknown };
+  if (pane?.kind === "browser") {
+    return {
+      id: crypto.randomUUID(),
+      kind: "browser",
+      title: typeof pane.title === "string" ? pane.title : "Browser",
+      url: typeof pane.url === "string" && pane.url ? pane.url : DEFAULT_BROWSER_URL,
+    };
+  }
+
+  return {
+    id: crypto.randomUUID(),
+    kind: "terminal",
+    title: typeof pane?.title === "string" ? pane.title : "PowerShell",
   };
 }
 
 function loadWorkspaces(): Workspace[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return [createWorkspace("Main")];
 
     const parsed = JSON.parse(raw) as Workspace[];
     if (!Array.isArray(parsed) || parsed.length === 0) return [createWorkspace("Main")];
 
     return parsed.map((workspace) => ({
-      ...workspace,
+      id: typeof workspace.id === "string" ? workspace.id : crypto.randomUUID(),
+      title: typeof workspace.title === "string" ? workspace.title : "Workspace",
+      cwd: typeof workspace.cwd === "string" ? workspace.cwd : "",
       unread: false,
-      panes: workspace.panes?.length
-        ? workspace.panes.map((pane) => ({ ...pane, id: crypto.randomUUID() }))
-        : [createPane()],
+      panes: workspace.panes?.length ? workspace.panes.map(migratePane) : [createTerminalPane()],
     }));
   } catch {
     return [createWorkspace("Main")];
@@ -59,6 +91,7 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaces));
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   }, [workspaces]);
 
   const selectWorkspace = useCallback((workspaceId: string) => {
@@ -82,30 +115,49 @@ export default function App() {
     setActiveWorkspaceId(workspace.id);
   }, [workspaces.length]);
 
-  const splitPane = useCallback(() => {
+  const splitTerminalPane = useCallback(() => {
     if (!activeWorkspace) return;
 
     setWorkspaces((current) =>
       current.map((workspace) =>
         workspace.id === activeWorkspace.id
-          ? { ...workspace, panes: [...workspace.panes, createPane()] }
+          ? { ...workspace, panes: [...workspace.panes, createTerminalPane()] }
           : workspace,
       ),
     );
   }, [activeWorkspace]);
 
-  const closePane = useCallback((sessionId: string) => {
+  const addBrowserPane = useCallback(() => {
+    if (!activeWorkspace) return;
+
+    setWorkspaces((current) =>
+      current.map((workspace) =>
+        workspace.id === activeWorkspace.id
+          ? { ...workspace, panes: [...workspace.panes, createBrowserPane()] }
+          : workspace,
+      ),
+    );
+  }, [activeWorkspace]);
+
+  const closePane = useCallback((paneId: string) => {
     setAttention((current) => {
       const next = { ...current };
-      delete next[sessionId];
+      delete next[paneId];
       return next;
     });
 
     setWorkspaces((current) =>
       current.map((workspace) => {
-        if (!workspace.panes.some((pane) => pane.id === sessionId)) return workspace;
-        const remaining = workspace.panes.filter((pane) => pane.id !== sessionId);
-        return { ...workspace, panes: remaining.length ? remaining : [createPane()] };
+        const pane = workspace.panes.find((candidate) => candidate.id === paneId);
+        if (!pane) return workspace;
+
+        void invoke(pane.kind === "browser" ? "close_browser_pane" : "close_terminal", {
+          paneId: pane.kind === "browser" ? pane.id : undefined,
+          sessionId: pane.kind === "terminal" ? pane.id : undefined,
+        });
+
+        const remaining = workspace.panes.filter((candidate) => candidate.id !== paneId);
+        return { ...workspace, panes: remaining.length ? remaining : [createTerminalPane()] };
       }),
     );
   }, []);
@@ -116,7 +168,11 @@ export default function App() {
       if (!target) return current;
 
       for (const pane of target.panes) {
-        void invoke("close_terminal", { sessionId: pane.id });
+        if (pane.kind === "browser") {
+          void invoke("close_browser_pane", { paneId: pane.id });
+        } else {
+          void invoke("close_terminal", { sessionId: pane.id });
+        }
       }
 
       setAttention((currentAttention) => {
@@ -160,6 +216,17 @@ export default function App() {
     );
   }, []);
 
+  const handleBrowserUrlChange = useCallback((paneId: string, url: string) => {
+    setWorkspaces((current) =>
+      current.map((workspace) => ({
+        ...workspace,
+        panes: workspace.panes.map((pane) =>
+          pane.id === paneId && pane.kind === "browser" ? { ...pane, url } : pane,
+        ),
+      })),
+    );
+  }, []);
+
   const clearAttention = useCallback(() => {
     if (!activeWorkspace) return;
 
@@ -191,12 +258,15 @@ export default function App() {
       if (key === "b" && !event.shiftKey) {
         event.preventDefault();
         setSidebarOpen((open) => !open);
+      } else if (key === "b" && event.shiftKey) {
+        event.preventDefault();
+        addBrowserPane();
       } else if (key === "n" && !event.shiftKey) {
         event.preventDefault();
         addWorkspace();
       } else if (key === "d" && event.shiftKey) {
         event.preventDefault();
-        splitPane();
+        splitTerminalPane();
       } else if (key === "w" && event.shiftKey && activeWorkspace) {
         event.preventDefault();
         closeWorkspace(activeWorkspace.id);
@@ -205,7 +275,15 @@ export default function App() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeWorkspace, addWorkspace, closeWorkspace, selectWorkspace, splitPane, workspaces]);
+  }, [
+    activeWorkspace,
+    addBrowserPane,
+    addWorkspace,
+    closeWorkspace,
+    selectWorkspace,
+    splitTerminalPane,
+    workspaces,
+  ]);
 
   if (!activeWorkspace) return null;
 
@@ -244,9 +322,23 @@ export default function App() {
               <FolderPlus size={16} />
               New workspace
             </button>
-            <button className="toolbar-button" type="button" onClick={splitPane} title="Ctrl+Shift+D">
+            <button
+              className="toolbar-button"
+              type="button"
+              onClick={splitTerminalPane}
+              title="Ctrl+Shift+D"
+            >
               <Columns2 size={16} />
-              Split right
+              Split terminal
+            </button>
+            <button
+              className="toolbar-button"
+              type="button"
+              onClick={addBrowserPane}
+              title="Ctrl+Shift+B"
+            >
+              <Globe2 size={16} />
+              Browser
             </button>
             <button className="toolbar-button" type="button" onClick={clearAttention}>
               <BellOff size={16} />
@@ -277,18 +369,30 @@ export default function App() {
                   gridTemplateColumns: `repeat(${Math.min(workspace.panes.length, 2)}, minmax(0, 1fr))`,
                 }}
               >
-                {workspace.panes.map((pane) => (
-                  <TerminalPane
-                    key={pane.id}
-                    sessionId={pane.id}
-                    title={pane.title}
-                    cwd={workspace.cwd}
-                    attention={Boolean(attention[pane.id])}
-                    onAttention={handleAttention}
-                    onTitleChange={handleTitleChange}
-                    onClose={closePane}
-                  />
-                ))}
+                {workspace.panes.map((pane) =>
+                  pane.kind === "browser" ? (
+                    <BrowserPane
+                      key={pane.id}
+                      paneId={pane.id}
+                      title={pane.title}
+                      url={pane.url}
+                      active={workspace.id === activeWorkspace.id}
+                      onUrlChange={handleBrowserUrlChange}
+                      onClose={closePane}
+                    />
+                  ) : (
+                    <TerminalPane
+                      key={pane.id}
+                      sessionId={pane.id}
+                      title={pane.title}
+                      cwd={workspace.cwd}
+                      attention={Boolean(attention[pane.id])}
+                      onAttention={handleAttention}
+                      onTitleChange={handleTitleChange}
+                      onClose={closePane}
+                    />
+                  ),
+                )}
               </div>
             </div>
           ))}
