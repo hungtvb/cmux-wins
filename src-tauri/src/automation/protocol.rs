@@ -5,7 +5,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub const MAX_REQUEST_ID_CHARS: usize = 128;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationRequest {
     pub version: u32,
@@ -20,7 +20,7 @@ fn default_params() -> Value {
     json!({})
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationResponse {
     pub version: u32,
@@ -32,10 +32,10 @@ pub struct AutomationResponse {
     pub error: Option<AutomationError>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutomationError {
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
 }
 
@@ -52,7 +52,7 @@ impl AutomationResponse {
 
     pub fn failure(
         id: impl Into<String>,
-        code: &'static str,
+        code: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
         Self {
@@ -61,7 +61,7 @@ impl AutomationResponse {
             ok: false,
             result: None,
             error: Some(AutomationError {
-                code,
+                code: code.into(),
                 message: message.into(),
             }),
         }
