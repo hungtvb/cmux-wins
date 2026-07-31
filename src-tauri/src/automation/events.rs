@@ -199,6 +199,15 @@ pub(crate) enum FrontendAutomationEventInput {
         url: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
+    PaneUpdated {
+        workspace_id: String,
+        pane_id: String,
+        pane_kind: String,
+        title: String,
+        #[serde(default)]
+        url: Option<String>,
+    },
+    #[serde(rename_all = "camelCase")]
     PaneClosed {
         workspace_id: String,
         pane_id: String,
@@ -250,16 +259,28 @@ impl FrontendAutomationEventInput {
                 pane_kind,
                 title,
                 url,
-            } => Ok((
+            } => pane_event(
                 "pane.created",
-                json!({
-                    "workspaceId": validate_identifier("workspaceId", workspace_id)?,
-                    "paneId": validate_identifier("paneId", pane_id)?,
-                    "paneKind": validate_pane_kind(pane_kind)?,
-                    "title": validate_text("title", title)?,
-                    "url": validate_optional_text("url", url)?,
-                }),
-            )),
+                workspace_id,
+                pane_id,
+                pane_kind,
+                title,
+                url,
+            ),
+            Self::PaneUpdated {
+                workspace_id,
+                pane_id,
+                pane_kind,
+                title,
+                url,
+            } => pane_event(
+                "pane.updated",
+                workspace_id,
+                pane_id,
+                pane_kind,
+                title,
+                url,
+            ),
             Self::PaneClosed {
                 workspace_id,
                 pane_id,
@@ -296,6 +317,26 @@ impl FrontendAutomationEventInput {
             )),
         }
     }
+}
+
+fn pane_event(
+    kind: &'static str,
+    workspace_id: String,
+    pane_id: String,
+    pane_kind: String,
+    title: String,
+    url: Option<String>,
+) -> Result<(&'static str, Value), String> {
+    Ok((
+        kind,
+        json!({
+            "workspaceId": validate_identifier("workspaceId", workspace_id)?,
+            "paneId": validate_identifier("paneId", pane_id)?,
+            "paneKind": validate_pane_kind(pane_kind)?,
+            "title": validate_text("title", title)?,
+            "url": validate_optional_text("url", url)?,
+        }),
+    ))
 }
 
 #[tauri::command]
@@ -432,6 +473,18 @@ mod tests {
         .expect("event should validate");
         assert_eq!(kind, "attention.requested");
         assert_eq!(payload["paneId"], "pane-1");
+
+        let (updated_kind, updated_payload) = FrontendAutomationEventInput::PaneUpdated {
+            workspace_id: "workspace-1".to_owned(),
+            pane_id: "pane-1".to_owned(),
+            pane_kind: "browser".to_owned(),
+            title: "Browser".to_owned(),
+            url: Some("https://example.com/".to_owned()),
+        }
+        .into_event()
+        .expect("pane update should validate");
+        assert_eq!(updated_kind, "pane.updated");
+        assert_eq!(updated_payload["url"], "https://example.com/");
 
         assert!(FrontendAutomationEventInput::PaneCreated {
             workspace_id: "workspace-1".to_owned(),
