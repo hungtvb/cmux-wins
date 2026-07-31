@@ -1,0 +1,35 @@
+.workspace-item:has(.workspace-item__metadata) {
+  min-height: 66px;
+}
+
+.workspace-item__metadata {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: #778398;
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.workspace-item__metadata > span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid #2a3240;
+  border-radius: 4px;
+  background: #121720;
+}
+
+.workspace-item__metadata > span:first-child {
+  color: #9fb5ee;
+}
+
+.workspace-item--active .workspace-item__metadata > span {
+  border-color: #35425a;
+  background: #171e2a;
+}
