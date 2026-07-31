@@ -4,7 +4,10 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tokio::{sync::Notify, time::timeout};
+use tokio::{
+    sync::Notify,
+    time::{timeout, Instant},
+};
 
 pub(crate) const MAX_TRANSCRIPT_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_TERMINAL_RECORDS: usize = 128;
@@ -90,6 +93,9 @@ impl TerminalAutomationStore {
             return Err(format!(
                 "terminal automation record limit reached: {MAX_TERMINAL_RECORDS}"
             ));
+        }
+        if replacing_existing {
+            state.order.retain(|(id, _)| id != session_id);
         }
 
         state.next_generation = state.next_generation.wrapping_add(1).max(1);
@@ -242,20 +248,31 @@ impl TerminalAutomationStore {
         max_bytes: usize,
         wait_ms: u64,
     ) -> Result<TerminalReadResult, String> {
-        let notified = self.changed.notified();
-        tokio::pin!(notified);
-        notified.as_mut().enable();
-
-        let initial = self.snapshot(session_id, after_seq, max_bytes)?;
-        if wait_ms == 0
-            || !initial.chunks.is_empty()
-            || initial.status != TerminalLifecycleStatus::Running
-        {
-            return Ok(initial);
+        if wait_ms == 0 {
+            return self.snapshot(session_id, after_seq, max_bytes);
         }
 
-        let _ = timeout(Duration::from_millis(wait_ms), notified.as_mut()).await;
-        self.snapshot(session_id, after_seq, max_bytes)
+        let deadline = Instant::now() + Duration::from_millis(wait_ms);
+        loop {
+            let notified = self.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+
+            let current = self.snapshot(session_id, after_seq, max_bytes)?;
+            if !current.chunks.is_empty()
+                || current.status != TerminalLifecycleStatus::Running
+            {
+                return Ok(current);
+            }
+
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(current);
+            }
+            if timeout(deadline - now, notified.as_mut()).await.is_err() {
+                return self.snapshot(session_id, after_seq, max_bytes);
+            }
+        }
     }
 }
 
@@ -361,6 +378,19 @@ mod tests {
     }
 
     #[test]
+    fn repeated_session_restarts_do_not_grow_order_index() {
+        let store = TerminalAutomationStore::default();
+        for _ in 0..1000 {
+            store
+                .begin_session("pane-1", "workspace-1")
+                .expect("replacement should work");
+        }
+        let state = store.state.lock().expect("store should lock");
+        assert_eq!(state.records.len(), 1);
+        assert_eq!(state.order.len(), 1);
+    }
+
+    #[test]
     fn completed_record_is_retained_until_capacity_is_needed() {
         let store = TerminalAutomationStore::default();
         let first_generation = store
@@ -443,10 +473,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn long_poll_wakes_on_output() {
+    async fn unrelated_output_does_not_complete_long_poll() {
         let store = std::sync::Arc::new(TerminalAutomationStore::default());
-        let generation = store
+        let pane_one_generation = store
             .begin_session("pane-1", "workspace-1")
+            .expect("session should begin");
+        let pane_two_generation = store
+            .begin_session("pane-2", "workspace-1")
             .expect("session should begin");
         let reader_store = store.clone();
         let reader = tokio::spawn(async move {
@@ -457,7 +490,10 @@ mod tests {
         });
 
         tokio::task::yield_now().await;
-        store.record_output("pane-1", generation, "hello".to_owned());
+        store.record_output("pane-2", pane_two_generation, "other".to_owned());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!reader.is_finished());
+        store.record_output("pane-1", pane_one_generation, "hello".to_owned());
         let result = reader.await.expect("reader should finish");
         assert_eq!(result.chunks[0].data, "hello");
     }
