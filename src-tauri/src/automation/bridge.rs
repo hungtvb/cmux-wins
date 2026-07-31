@@ -107,7 +107,7 @@ pub async fn request(
         Ok(resolution.result.unwrap_or_else(|| Value::Object(Default::default())))
     } else {
         Err(BridgeError {
-            code: leak_error_code(resolution.error_code.as_deref().unwrap_or("UI_ERROR")),
+            code: allow_error_code(resolution.error_code.as_deref().unwrap_or("UI_ERROR")),
             message: resolution
                 .error_message
                 .unwrap_or_else(|| "workspace UI rejected the automation command".to_owned()),
@@ -140,12 +140,13 @@ fn remove_pending(bridge: &AutomationBridge, command_id: u64) {
     }
 }
 
-fn leak_error_code(code: &str) -> &'static str {
+fn allow_error_code(code: &str) -> &'static str {
     match code {
         "INVALID_REQUEST" => "INVALID_REQUEST",
         "WORKSPACE_NOT_FOUND" => "WORKSPACE_NOT_FOUND",
         "PANE_NOT_FOUND" => "PANE_NOT_FOUND",
         "LAST_WORKSPACE_PROTECTED" => "LAST_WORKSPACE_PROTECTED",
+        "LAST_PANE_PROTECTED" => "LAST_PANE_PROTECTED",
         _ => "UI_ERROR",
     }
 }
@@ -156,7 +157,8 @@ mod tests {
 
     #[test]
     fn frontend_error_codes_are_allowlisted() {
-        assert_eq!(leak_error_code("WORKSPACE_NOT_FOUND"), "WORKSPACE_NOT_FOUND");
-        assert_eq!(leak_error_code("UNTRUSTED_DYNAMIC_CODE"), "UI_ERROR");
+        assert_eq!(allow_error_code("WORKSPACE_NOT_FOUND"), "WORKSPACE_NOT_FOUND");
+        assert_eq!(allow_error_code("LAST_PANE_PROTECTED"), "LAST_PANE_PROTECTED");
+        assert_eq!(allow_error_code("UNTRUSTED_DYNAMIC_CODE"), "UI_ERROR");
     }
 }
