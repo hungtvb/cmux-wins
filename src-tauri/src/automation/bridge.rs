@@ -15,9 +15,15 @@ const BRIDGE_TIMEOUT: Duration = Duration::from_secs(5);
 const AUTOMATION_REQUEST_EVENT: &str = "automation-request";
 
 #[derive(Default)]
+struct BridgeState {
+    frontend_ready: bool,
+    pending: HashMap<u64, oneshot::Sender<FrontendAutomationResolution>>,
+}
+
+#[derive(Default)]
 pub struct AutomationBridge {
     next_command_id: AtomicU64,
-    pending: Mutex<HashMap<u64, oneshot::Sender<FrontendAutomationResolution>>>,
+    state: Mutex<BridgeState>,
 }
 
 #[derive(Clone, Serialize)]
@@ -65,11 +71,19 @@ pub async fn request(
     let command_id = bridge.next_command_id.fetch_add(1, Ordering::Relaxed) + 1;
     let (sender, receiver) = oneshot::channel();
 
-    bridge
-        .pending
-        .lock()
-        .map_err(|_| BridgeError::internal("automation bridge lock is poisoned"))?
-        .insert(command_id, sender);
+    {
+        let mut state = bridge
+            .state
+            .lock()
+            .map_err(|_| BridgeError::internal("automation bridge lock is poisoned"))?;
+        if !state.frontend_ready {
+            return Err(BridgeError {
+                code: "UI_NOT_READY",
+                message: "workspace UI is not ready for automation requests".to_owned(),
+            });
+        }
+        state.pending.insert(command_id, sender);
+    }
 
     let payload = FrontendAutomationRequest {
         command_id,
@@ -116,14 +130,46 @@ pub async fn request(
 }
 
 #[tauri::command]
+pub fn set_automation_frontend_ready(
+    bridge: State<'_, AutomationBridge>,
+    ready: bool,
+) -> Result<(), String> {
+    let pending = {
+        let mut state = bridge
+            .state
+            .lock()
+            .map_err(|_| "automation bridge lock is poisoned".to_owned())?;
+        state.frontend_ready = ready;
+        if ready {
+            HashMap::new()
+        } else {
+            std::mem::take(&mut state.pending)
+        }
+    };
+
+    for (command_id, sender) in pending {
+        let _ = sender.send(FrontendAutomationResolution {
+            command_id,
+            ok: false,
+            result: None,
+            error_code: Some("UI_NOT_READY".to_owned()),
+            error_message: Some("workspace UI was unloaded before completing the command".to_owned()),
+        });
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn resolve_automation_request(
     bridge: State<'_, AutomationBridge>,
     resolution: FrontendAutomationResolution,
 ) -> Result<(), String> {
     let sender = bridge
-        .pending
+        .state
         .lock()
         .map_err(|_| "automation bridge lock is poisoned".to_owned())?
+        .pending
         .remove(&resolution.command_id);
 
     // A late response after timeout or frontend reload is intentionally ignored.
@@ -135,8 +181,8 @@ pub fn resolve_automation_request(
 }
 
 fn remove_pending(bridge: &AutomationBridge, command_id: u64) {
-    if let Ok(mut pending) = bridge.pending.lock() {
-        pending.remove(&command_id);
+    if let Ok(mut state) = bridge.state.lock() {
+        state.pending.remove(&command_id);
     }
 }
 
@@ -147,6 +193,7 @@ fn allow_error_code(code: &str) -> &'static str {
         "PANE_NOT_FOUND" => "PANE_NOT_FOUND",
         "LAST_WORKSPACE_PROTECTED" => "LAST_WORKSPACE_PROTECTED",
         "LAST_PANE_PROTECTED" => "LAST_PANE_PROTECTED",
+        "UI_NOT_READY" => "UI_NOT_READY",
         _ => "UI_ERROR",
     }
 }
@@ -160,5 +207,30 @@ mod tests {
         assert_eq!(allow_error_code("WORKSPACE_NOT_FOUND"), "WORKSPACE_NOT_FOUND");
         assert_eq!(allow_error_code("LAST_PANE_PROTECTED"), "LAST_PANE_PROTECTED");
         assert_eq!(allow_error_code("UNTRUSTED_DYNAMIC_CODE"), "UI_ERROR");
+    }
+
+    #[test]
+    fn unloading_frontend_drains_pending_requests() {
+        let bridge = AutomationBridge::default();
+        {
+            let mut state = bridge.state.lock().expect("bridge lock should open");
+            state.frontend_ready = true;
+            let (sender, receiver) = oneshot::channel();
+            state.pending.insert(7, sender);
+            drop(receiver);
+        }
+
+        let pending = {
+            let mut state = bridge.state.lock().expect("bridge lock should open");
+            state.frontend_ready = false;
+            std::mem::take(&mut state.pending)
+        };
+        assert_eq!(pending.len(), 1);
+        assert!(bridge
+            .state
+            .lock()
+            .expect("bridge lock should open")
+            .pending
+            .is_empty());
     }
 }
