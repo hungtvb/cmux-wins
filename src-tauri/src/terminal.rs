@@ -135,7 +135,7 @@ pub(crate) fn spawn_terminal(
         command.cwd(cwd);
     }
 
-    let child = pair
+    let mut child = pair
         .slave
         .spawn_command(command)
         .map_err(|error| format!("unable to spawn shell '{shell}': {error}"))?;
@@ -151,9 +151,16 @@ pub(crate) fn spawn_terminal(
 
     drop(pair.slave);
 
-    let generation = state
+    let generation = match state
         .terminal_automation
-        .begin_session(&session_id, &workspace_id)?;
+        .begin_session(&session_id, &workspace_id)
+    {
+        Ok(generation) => generation,
+        Err(error) => {
+            let _ = child.kill();
+            return Err(error);
+        }
+    };
     let session = Arc::new(PtySession {
         workspace_id,
         process_id,
@@ -201,11 +208,16 @@ pub(crate) fn spawn_terminal(
         }
 
         let app_state = app.state::<AppState>();
-        let removed = app_state
-            .sessions
-            .lock()
-            .ok()
-            .and_then(|mut sessions| sessions.remove(&session_id));
+        let removed = app_state.sessions.lock().ok().and_then(|mut sessions| {
+            let is_current_generation = sessions
+                .get(&session_id)
+                .is_some_and(|session| session.generation == generation);
+            if is_current_generation {
+                sessions.remove(&session_id)
+            } else {
+                None
+            }
+        });
 
         let Some(session) = removed else {
             return;
