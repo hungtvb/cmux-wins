@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   useEffect,
+  useRef,
   type Dispatch,
-  type MutableRefObject,
   type SetStateAction,
 } from "react";
 import type { Pane, Workspace } from "../types";
@@ -17,8 +17,8 @@ type AutomationRequestEvent = {
 };
 
 type UseAutomationBridgeOptions = {
-  workspacesRef: MutableRefObject<Workspace[]>;
-  activeWorkspaceIdRef: MutableRefObject<string>;
+  workspaces: Workspace[];
+  activeWorkspaceId: string;
   setWorkspaces: Dispatch<SetStateAction<Workspace[]>>;
   setActiveWorkspaceId: Dispatch<SetStateAction<string>>;
   setAttention: Dispatch<SetStateAction<Record<string, string>>>;
@@ -59,12 +59,23 @@ function requireString(params: Record<string, unknown>, name: string): string {
 }
 
 export function useAutomationBridge({
-  workspacesRef,
-  activeWorkspaceIdRef,
+  workspaces,
+  activeWorkspaceId,
   setWorkspaces,
   setActiveWorkspaceId,
   setAttention,
 }: UseAutomationBridgeOptions) {
+  const workspacesRef = useRef(workspaces);
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+
+  useEffect(() => {
+    workspacesRef.current = workspaces;
+  }, [workspaces]);
+
+  useEffect(() => {
+    activeWorkspaceIdRef.current = activeWorkspaceId;
+  }, [activeWorkspaceId]);
+
   useEffect(() => {
     let disposed = false;
 
@@ -157,8 +168,8 @@ export function useAutomationBridge({
             );
           }
 
-          const next = commitWorkspaces((workspaces) =>
-            workspaces.filter((workspace) => workspace.id !== workspaceId),
+          const next = commitWorkspaces((items) =>
+            items.filter((workspace) => workspace.id !== workspaceId),
           );
           setAttention((attention) => {
             const updated = { ...attention };
@@ -182,20 +193,18 @@ export function useAutomationBridge({
         case "pane.createTerminal": {
           const workspaceId = requireString(params, "workspaceId");
           const pane = createTerminalPane();
-          let found = false;
-          commitWorkspaces((current) =>
-            current.map((workspace) => {
-              if (workspace.id !== workspaceId) return workspace;
-              found = true;
-              return { ...workspace, panes: [...workspace.panes, pane] };
-            }),
-          );
-          if (!found) {
+          const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
+          if (!workspace) {
             throw new AutomationUiError(
               "WORKSPACE_NOT_FOUND",
               `workspace not found: ${workspaceId}`,
             );
           }
+          commitWorkspaces((current) =>
+            current.map((item) =>
+              item.id === workspaceId ? { ...item, panes: [...item.panes, pane] } : item,
+            ),
+          );
           return { workspaceId, paneId: pane.id, kind: pane.kind };
         }
 
@@ -203,20 +212,18 @@ export function useAutomationBridge({
           const workspaceId = requireString(params, "workspaceId");
           const url = typeof params.url === "string" ? params.url : DEFAULT_BROWSER_URL;
           const pane = createBrowserPane(url);
-          let found = false;
-          commitWorkspaces((current) =>
-            current.map((workspace) => {
-              if (workspace.id !== workspaceId) return workspace;
-              found = true;
-              return { ...workspace, panes: [...workspace.panes, pane] };
-            }),
-          );
-          if (!found) {
+          const workspace = workspacesRef.current.find((item) => item.id === workspaceId);
+          if (!workspace) {
             throw new AutomationUiError(
               "WORKSPACE_NOT_FOUND",
               `workspace not found: ${workspaceId}`,
             );
           }
+          commitWorkspaces((current) =>
+            current.map((item) =>
+              item.id === workspaceId ? { ...item, panes: [...item.panes, pane] } : item,
+            ),
+          );
           return { workspaceId, paneId: pane.id, kind: pane.kind, url: pane.url };
         }
 
@@ -295,11 +302,5 @@ export function useAutomationBridge({
       disposed = true;
       void unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [
-    activeWorkspaceIdRef,
-    setActiveWorkspaceId,
-    setAttention,
-    setWorkspaces,
-    workspacesRef,
-  ]);
+  }, [setActiveWorkspaceId, setAttention, setWorkspaces]);
 }
