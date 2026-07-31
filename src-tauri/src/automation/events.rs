@@ -15,9 +15,11 @@ pub(crate) const MAX_EVENT_RECORDS: usize = 1024;
 pub(crate) const MAX_EVENT_PAYLOAD_BYTES: usize = 8 * 1024;
 pub(crate) const MAX_EVENT_READ_COUNT: usize = 100;
 pub(crate) const MAX_EVENT_WAIT_MS: u64 = 30_000;
+const MAX_EVENT_READ_BYTES: usize = 32 * 1024;
 const MAX_FRONTEND_EVENT_BATCH: usize = 64;
 const MAX_IDENTIFIER_CHARS: usize = 128;
 const MAX_EVENT_TEXT_CHARS: usize = 1024;
+const MAX_EVENT_KIND_BYTES: usize = 64;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,7 +59,7 @@ impl AutomationEventStore {
         kind: impl Into<String>,
         payload: Value,
     ) -> Result<u64, String> {
-        let kind = kind.into();
+        let kind = validate_event_kind(kind.into())?;
         let payload_bytes = serde_json::to_vec(&payload)
             .map_err(|error| format!("unable to serialize automation event payload: {error}"))?;
         if payload_bytes.len() > MAX_EVENT_PAYLOAD_BYTES {
@@ -102,13 +104,30 @@ impl AutomationEventStore {
             .unwrap_or_else(|| state.next_seq.saturating_add(1));
         let latest_seq = state.next_seq;
         let dropped = after_seq.saturating_add(1) < earliest_seq;
-        let events: Vec<_> = state
-            .records
-            .iter()
-            .filter(|event| event.seq > after_seq)
-            .take(max_events)
-            .cloned()
-            .collect();
+        let mut events = Vec::new();
+        let mut used_bytes = 0_usize;
+
+        for event in state.records.iter().filter(|event| event.seq > after_seq) {
+            if events.len() >= max_events {
+                break;
+            }
+            let event_bytes = serde_json::to_vec(event)
+                .map_err(|error| format!("unable to serialize automation event: {error}"))?
+                .len();
+            if !events.is_empty()
+                && used_bytes.saturating_add(event_bytes) > MAX_EVENT_READ_BYTES
+            {
+                break;
+            }
+            if events.is_empty() && event_bytes > MAX_EVENT_READ_BYTES {
+                return Err(format!(
+                    "automation event exceeds read limit ({event_bytes} > {MAX_EVENT_READ_BYTES})"
+                ));
+            }
+            used_bytes = used_bytes.saturating_add(event_bytes);
+            events.push(event.clone());
+        }
+
         let next_seq = events
             .last()
             .map(|event| event.seq)
@@ -158,7 +177,7 @@ impl AutomationEventStore {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) enum FrontendAutomationEventInput {
     #[serde(rename_all = "camelCase")]
     WorkspaceCreated {
@@ -231,20 +250,16 @@ impl FrontendAutomationEventInput {
                 pane_kind,
                 title,
                 url,
-            } => {
-                let pane_kind = validate_pane_kind(pane_kind)?;
-                let url = validate_optional_text("url", url)?;
-                Ok((
-                    "pane.created",
-                    json!({
-                        "workspaceId": validate_identifier("workspaceId", workspace_id)?,
-                        "paneId": validate_identifier("paneId", pane_id)?,
-                        "paneKind": pane_kind,
-                        "title": validate_text("title", title)?,
-                        "url": url,
-                    }),
-                ))
-            }
+            } => Ok((
+                "pane.created",
+                json!({
+                    "workspaceId": validate_identifier("workspaceId", workspace_id)?,
+                    "paneId": validate_identifier("paneId", pane_id)?,
+                    "paneKind": validate_pane_kind(pane_kind)?,
+                    "title": validate_text("title", title)?,
+                    "url": validate_optional_text("url", url)?,
+                }),
+            )),
             Self::PaneClosed {
                 workspace_id,
                 pane_id,
@@ -304,6 +319,20 @@ pub(crate) fn publish_frontend_automation_events(
     Ok(())
 }
 
+fn validate_event_kind(value: String) -> Result<String, String> {
+    if value.is_empty()
+        || value.len() > MAX_EVENT_KIND_BYTES
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'.')
+    {
+        return Err(format!(
+            "event kind must contain 1 to {MAX_EVENT_KIND_BYTES} lowercase ASCII letters, digits or dots"
+        ));
+    }
+    Ok(value)
+}
+
 fn validate_identifier(name: &str, value: String) -> Result<String, String> {
     let value = value.trim();
     if value.is_empty()
@@ -321,7 +350,9 @@ fn validate_identifier(name: &str, value: String) -> Result<String, String> {
 
 fn validate_text(name: &str, value: String) -> Result<String, String> {
     let value = value.trim();
-    if value.chars().count() > MAX_EVENT_TEXT_CHARS || value.chars().any(|character| character == '\0') {
+    if value.chars().count() > MAX_EVENT_TEXT_CHARS
+        || value.chars().any(|character| character == '\0')
+    {
         return Err(format!(
             "{name} must contain at most {MAX_EVENT_TEXT_CHARS} characters and no NUL bytes"
         ));
@@ -374,6 +405,23 @@ mod tests {
     }
 
     #[test]
+    fn serialized_read_batch_is_bounded() {
+        let store = AutomationEventStore::default();
+        for index in 0..100 {
+            store
+                .publish(
+                    "test.event",
+                    json!({ "index": index, "value": "\u{1b}".repeat(1024) }),
+                )
+                .expect("event should publish");
+        }
+        let snapshot = store.snapshot(0, 100).expect("snapshot should work");
+        let encoded = serde_json::to_vec(&snapshot).expect("snapshot should serialize");
+        assert!(encoded.len() < 64 * 1024);
+        assert!(snapshot.has_more);
+    }
+
+    #[test]
     fn frontend_event_kinds_and_payloads_are_allowlisted() {
         let (kind, payload) = FrontendAutomationEventInput::AttentionRequested {
             workspace_id: "workspace-1".to_owned(),
@@ -394,6 +442,7 @@ mod tests {
         }
         .into_event()
         .is_err());
+        assert!(validate_event_kind("Terminal.Started".to_owned()).is_err());
     }
 
     #[test]
