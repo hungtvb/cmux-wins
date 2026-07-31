@@ -11,6 +11,7 @@ import { BrowserPane } from "./components/BrowserPane";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { useAutomationBridge } from "./hooks/useAutomationBridge";
+import { useAutomationEventPublisher } from "./hooks/useAutomationEventPublisher";
 import { useWorkspaceMetadata } from "./hooks/useWorkspaceMetadata";
 import type { Pane, Workspace } from "./types";
 
@@ -88,6 +89,11 @@ export default function App() {
     setWorkspaces,
     setActiveWorkspaceId,
     setAttention,
+  });
+  useAutomationEventPublisher({
+    workspaces,
+    activeWorkspaceId,
+    attention,
   });
 
   const activeWorkspace = useMemo(
