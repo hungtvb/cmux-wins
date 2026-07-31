@@ -8,7 +8,7 @@ on:
 jobs:
   check:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -33,12 +33,12 @@ jobs:
       - name: Type-check and build frontend
         run: npm run build
 
-      - name: Check Rust backend
+      - name: Check Rust backend and binaries
         id: cargo-check
         continue-on-error: true
         shell: pwsh
         run: |
-          cmd /c "cargo check --manifest-path src-tauri/Cargo.toml > cargo-check.log 2>&1"
+          cmd /c "cargo check --manifest-path src-tauri/Cargo.toml --all-targets > cargo-check.log 2>&1"
           $exitCode = $LASTEXITCODE
           Get-Content cargo-check.log
           exit $exitCode
@@ -60,7 +60,7 @@ jobs:
       - name: Run Rust unit tests
         id: cargo-unit-test
         continue-on-error: true
-        timeout-minutes: 10
+        timeout-minutes: 12
         shell: pwsh
         run: |
           cmd /c "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1 > cargo-unit-test.log 2>&1"
@@ -106,6 +106,17 @@ jobs:
         if: steps.cargo-test.outcome == 'failure'
         shell: pwsh
         run: exit 1
+
+      - name: Build automation CLI
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin cmux-cli
+
+      - name: Upload automation CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmux-cli-windows-x64
+          path: src-tauri/target/release/cmux-cli.exe
+          if-no-files-found: error
+          retention-days: 7
 
   installer:
     needs: check
