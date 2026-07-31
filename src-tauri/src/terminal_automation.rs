@@ -235,6 +235,9 @@ impl TerminalAutomationStore {
         wait_ms: u64,
     ) -> Result<TerminalReadResult, String> {
         let notified = self.changed.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+
         let initial = self.snapshot(session_id, after_seq, max_bytes)?;
         if wait_ms == 0
             || !initial.chunks.is_empty()
@@ -243,7 +246,7 @@ impl TerminalAutomationStore {
             return Ok(initial);
         }
 
-        let _ = timeout(Duration::from_millis(wait_ms), notified).await;
+        let _ = timeout(Duration::from_millis(wait_ms), notified.as_mut()).await;
         self.snapshot(session_id, after_seq, max_bytes)
     }
 }
@@ -331,6 +334,20 @@ mod tests {
         assert!(chunks.len() > 1);
         assert_eq!(chunks.concat(), "ế".repeat(5000));
         assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_STORED_CHUNK_BYTES));
+    }
+
+    #[test]
+    fn escaped_read_response_stays_under_protocol_limit() {
+        let store = TerminalAutomationStore::default();
+        let generation = store
+            .begin_session("pane-1", "workspace-1")
+            .expect("session should begin");
+        store.record_output("pane-1", generation, "\u{1b}".repeat(MAX_READ_BYTES));
+        let snapshot = store
+            .snapshot("pane-1", 0, MAX_READ_BYTES)
+            .expect("snapshot should work");
+        let encoded = serde_json::to_vec(&snapshot).expect("snapshot should serialize");
+        assert!(encoded.len() < 64 * 1024);
     }
 
     #[test]
