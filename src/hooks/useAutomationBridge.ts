@@ -51,6 +51,7 @@ export function useAutomationBridge({
   useEffect(() => {
     let disposed = false;
     let unlisten: UnlistenFn | undefined;
+    let readyTransition: Promise<unknown> = Promise.resolve();
     const sessionId = crypto.randomUUID();
 
     void listen<AutomationRequestEvent>("automation-request", (event) => {
@@ -120,9 +121,11 @@ export function useAutomationBridge({
           return;
         }
         unlisten = dispose;
-        void invoke("set_automation_frontend_ready", {
+        readyTransition = invoke("set_automation_frontend_ready", {
           sessionId,
           ready: true,
+        }).catch(() => {
+          // The bridge remains not-ready and CLI requests fail explicitly.
         });
       })
       .catch(() => {
@@ -132,10 +135,12 @@ export function useAutomationBridge({
     return () => {
       disposed = true;
       unlisten?.();
-      void invoke("set_automation_frontend_ready", {
-        sessionId,
-        ready: false,
-      });
+      void readyTransition.finally(() =>
+        invoke("set_automation_frontend_ready", {
+          sessionId,
+          ready: false,
+        }).catch(() => undefined),
+      );
     };
   }, [setActiveWorkspaceId, setAttention, setWorkspaces]);
 }
