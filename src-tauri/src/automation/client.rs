@@ -19,6 +19,20 @@ use super::{
 const CONNECT_RETRIES: usize = 40;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(50);
 const ERROR_PIPE_BUSY_CODE: i32 = 231;
+const HELP: &str = "cmux-cli <ping|info|workspace|pane>\n\n\
+  cmux-cli workspace list\n\
+  cmux-cli workspace create <title> [--cwd <path>] [--no-activate]\n\
+  cmux-cli workspace select <workspace-id>\n\
+  cmux-cli workspace close <workspace-id>\n\
+  cmux-cli pane terminal <workspace-id>\n\
+  cmux-cli pane browser <workspace-id> [url]\n\
+  cmux-cli pane close <workspace-id> <pane-id>";
+
+#[derive(Debug, PartialEq)]
+enum CliAction {
+    Help,
+    Call { method: &'static str, params: Value },
+}
 
 pub async fn call(method: &str, params: Value) -> io::Result<AutomationResponse> {
     let config = load()?;
@@ -72,23 +86,13 @@ pub async fn call(method: &str, params: Value) -> io::Result<AutomationResponse>
 }
 
 pub async fn run_cli() -> Result<bool, String> {
-    let mut arguments = std::env::args().skip(1);
-    let command = arguments.next().unwrap_or_else(|| "help".to_owned());
-    if arguments.next().is_some() {
-        return Err("cmux-cli accepts exactly one command: ping or info".to_owned());
-    }
-
-    let method = match command.as_str() {
-        "ping" => "ping",
-        "info" => "app.info",
-        "help" | "--help" | "-h" => {
-            println!("cmux-cli <ping|info>");
-            return Ok(true);
-        }
-        _ => return Err(format!("unsupported command: {command}")),
+    let action = parse_cli_args(std::env::args().skip(1))?;
+    let CliAction::Call { method, params } = action else {
+        println!("{HELP}");
+        return Ok(true);
     };
 
-    let response = call(method, json!({}))
+    let response = call(method, params)
         .await
         .map_err(|error| format!("unable to call cmux automation endpoint: {error}"))?;
     println!(
@@ -97,6 +101,138 @@ pub async fn run_cli() -> Result<bool, String> {
             .map_err(|error| format!("unable to serialize response: {error}"))?
     );
     Ok(response.ok)
+}
+
+fn parse_cli_args<I>(arguments: I) -> Result<CliAction, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut arguments = arguments.into_iter();
+    let command = arguments.next().unwrap_or_else(|| "help".to_owned());
+
+    match command.as_str() {
+        "help" | "--help" | "-h" => ensure_finished(arguments).map(|_| CliAction::Help),
+        "ping" => ensure_finished(arguments).map(|_| CliAction::Call {
+            method: "ping",
+            params: json!({}),
+        }),
+        "info" => ensure_finished(arguments).map(|_| CliAction::Call {
+            method: "app.info",
+            params: json!({}),
+        }),
+        "workspace" => parse_workspace_command(arguments),
+        "pane" => parse_pane_command(arguments),
+        _ => Err(format!("unsupported command: {command}\n\n{HELP}")),
+    }
+}
+
+fn parse_workspace_command<I>(mut arguments: I) -> Result<CliAction, String>
+where
+    I: Iterator<Item = String>,
+{
+    let command = arguments
+        .next()
+        .ok_or_else(|| format!("workspace subcommand is required\n\n{HELP}"))?;
+
+    match command.as_str() {
+        "list" => ensure_finished(arguments).map(|_| CliAction::Call {
+            method: "workspace.list",
+            params: json!({}),
+        }),
+        "select" | "close" => {
+            let workspace_id = required_argument(&mut arguments, "workspace-id")?;
+            ensure_finished(arguments)?;
+            Ok(CliAction::Call {
+                method: if command == "select" {
+                    "workspace.select"
+                } else {
+                    "workspace.close"
+                },
+                params: json!({ "workspaceId": workspace_id }),
+            })
+        }
+        "create" => {
+            let title = required_argument(&mut arguments, "title")?;
+            let mut cwd = String::new();
+            let mut activate = true;
+
+            while let Some(argument) = arguments.next() {
+                match argument.as_str() {
+                    "--cwd" => cwd = required_argument(&mut arguments, "path")?,
+                    "--no-activate" => activate = false,
+                    _ => return Err(format!("unsupported workspace create option: {argument}")),
+                }
+            }
+
+            Ok(CliAction::Call {
+                method: "workspace.create",
+                params: json!({ "title": title, "cwd": cwd, "activate": activate }),
+            })
+        }
+        _ => Err(format!("unsupported workspace command: {command}\n\n{HELP}")),
+    }
+}
+
+fn parse_pane_command<I>(mut arguments: I) -> Result<CliAction, String>
+where
+    I: Iterator<Item = String>,
+{
+    let command = arguments
+        .next()
+        .ok_or_else(|| format!("pane subcommand is required\n\n{HELP}"))?;
+
+    match command.as_str() {
+        "terminal" => {
+            let workspace_id = required_argument(&mut arguments, "workspace-id")?;
+            ensure_finished(arguments)?;
+            Ok(CliAction::Call {
+                method: "pane.createTerminal",
+                params: json!({ "workspaceId": workspace_id }),
+            })
+        }
+        "browser" => {
+            let workspace_id = required_argument(&mut arguments, "workspace-id")?;
+            let url = arguments.next();
+            ensure_finished(arguments)?;
+            Ok(CliAction::Call {
+                method: "pane.createBrowser",
+                params: match url {
+                    Some(url) => json!({ "workspaceId": workspace_id, "url": url }),
+                    None => json!({ "workspaceId": workspace_id }),
+                },
+            })
+        }
+        "close" => {
+            let workspace_id = required_argument(&mut arguments, "workspace-id")?;
+            let pane_id = required_argument(&mut arguments, "pane-id")?;
+            ensure_finished(arguments)?;
+            Ok(CliAction::Call {
+                method: "pane.close",
+                params: json!({ "workspaceId": workspace_id, "paneId": pane_id }),
+            })
+        }
+        _ => Err(format!("unsupported pane command: {command}\n\n{HELP}")),
+    }
+}
+
+fn required_argument<I>(arguments: &mut I, name: &str) -> Result<String, String>
+where
+    I: Iterator<Item = String>,
+{
+    arguments
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("missing required argument: {name}"))
+}
+
+fn ensure_finished<I>(mut arguments: I) -> Result<(), String>
+where
+    I: Iterator<Item = String>,
+{
+    match arguments.next() {
+        Some(argument) => Err(format!("unexpected argument: {argument}")),
+        None => Ok(()),
+    }
 }
 
 async fn read_response_line<R>(reader: &mut R) -> io::Result<Vec<u8>>
@@ -168,9 +304,72 @@ fn request_id() -> String {
 mod tests {
     use super::*;
 
+    fn args(values: &[&str]) -> impl Iterator<Item = String> + '_ {
+        values.iter().map(|value| (*value).to_owned())
+    }
+
     #[test]
     fn request_ids_are_non_empty_and_process_scoped() {
         let id = request_id();
         assert!(id.starts_with(&format!("cli-{}-", process::id())));
+    }
+
+    #[test]
+    fn parses_workspace_creation_options() {
+        let action = parse_cli_args(args(&[
+            "workspace",
+            "create",
+            "Agent",
+            "--cwd",
+            "C:\\code",
+            "--no-activate",
+        ]))
+        .expect("command should parse");
+
+        assert_eq!(
+            action,
+            CliAction::Call {
+                method: "workspace.create",
+                params: json!({
+                    "title": "Agent",
+                    "cwd": "C:\\code",
+                    "activate": false
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_browser_and_close_commands() {
+        assert_eq!(
+            parse_cli_args(args(&["pane", "browser", "workspace-1", "https://example.com"]))
+                .expect("browser command should parse"),
+            CliAction::Call {
+                method: "pane.createBrowser",
+                params: json!({
+                    "workspaceId": "workspace-1",
+                    "url": "https://example.com"
+                }),
+            }
+        );
+        assert_eq!(
+            parse_cli_args(args(&["pane", "close", "workspace-1", "pane-1"]))
+                .expect("close command should parse"),
+            CliAction::Call {
+                method: "pane.close",
+                params: json!({
+                    "workspaceId": "workspace-1",
+                    "paneId": "pane-1"
+                }),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_options_and_extra_arguments() {
+        assert!(parse_cli_args(args(&["workspace", "create", "Agent", "--unknown"]))
+            .is_err());
+        assert!(parse_cli_args(args(&["workspace", "list", "extra"]))
+            .is_err());
     }
 }
