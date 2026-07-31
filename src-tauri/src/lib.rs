@@ -3,7 +3,9 @@ mod browser;
 mod terminal;
 mod workspace_metadata;
 
-use automation::bridge::{resolve_automation_request, AutomationBridge};
+use automation::bridge::{
+    resolve_automation_request, set_automation_frontend_ready, AutomationBridge,
+};
 use browser::{
     browser_go_back, browser_go_forward, close_browser_pane, create_browser_pane,
     hide_browser_pane, navigate_browser_pane, reload_browser_pane, set_browser_pane_bounds,
@@ -38,6 +40,7 @@ pub fn run() {
             hide_browser_pane,
             close_browser_pane,
             get_workspace_metadata_batch,
+            set_automation_frontend_ready,
             resolve_automation_request
         ])
         .run(tauri::generate_context!())
