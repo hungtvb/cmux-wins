@@ -4,6 +4,7 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -18,6 +19,7 @@ const TERMINATION_GRACE: Duration = Duration::from_millis(500);
 pub struct WorkspaceMetadataRequest {
     pub workspace_id: String,
     pub cwd: String,
+    pub resolve_pull_request: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -102,6 +104,14 @@ fn run_bounded(
         .spawn()
         .ok()?;
 
+    let mut stdout = child.stdout.take()?;
+    let (output_tx, output_rx) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut output = String::new();
+        let result = stdout.read_to_string(&mut output).map(|_| output);
+        let _ = output_tx.send(result);
+    });
+
     let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait().ok()? {
@@ -114,9 +124,15 @@ fn run_bounded(
         }
     };
 
-    let mut output = String::new();
-    child.stdout.take()?.read_to_string(&mut output).ok()?;
-    status.success().then(|| output.trim().to_owned())
+    if !status.success() {
+        return None;
+    }
+
+    output_rx
+        .recv_timeout(TERMINATION_GRACE)
+        .ok()?
+        .ok()
+        .map(|output| output.trim().to_owned())
 }
 
 fn inspect_process_snapshot() -> Option<ProcessSnapshot> {
@@ -282,7 +298,7 @@ pub async fn inspect_workspace_metadata_batch(
                 } else {
                     let path = PathBuf::from(&request.cwd);
                     if path.is_dir() {
-                        inspect_git(&path, true)
+                        inspect_git(&path, request.resolve_pull_request)
                     } else {
                         WorkspaceMetadata::default()
                     }
@@ -382,6 +398,27 @@ mod tests {
 
         let result = ports_by_workspace(&snapshot, &roots);
         assert_eq!(result.get("workspace-a"), Some(&vec![3000, 5173]));
+    }
+
+    #[test]
+    fn drains_large_command_output_without_blocking_the_child() {
+        #[cfg(windows)]
+        let (program, args) = (
+            "powershell.exe",
+            vec![
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "'x' * 131072",
+            ],
+        );
+        #[cfg(not(windows))]
+        let (program, args) = ("sh", vec!["-c", "head -c 131072 /dev/zero | tr '\\0' x"]);
+
+        let output = run_bounded(program, &args, &std::env::temp_dir(), Duration::from_secs(5))
+            .expect("large command output should be drained concurrently");
+        assert!(output.len() >= 131_072);
     }
 
     #[test]
