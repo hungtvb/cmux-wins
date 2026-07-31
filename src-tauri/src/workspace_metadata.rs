@@ -68,7 +68,7 @@ fn run_bounded(
     status.success().then(|| output.trim().to_owned())
 }
 
-fn inspect_git(cwd: &Path) -> WorkspaceMetadata {
+fn inspect_git(cwd: &Path, resolve_pull_request: bool) -> WorkspaceMetadata {
     let Some(root_text) = run_bounded(
         "git",
         &["rev-parse", "--show-toplevel"],
@@ -121,13 +121,17 @@ fn inspect_git(cwd: &Path) -> WorkspaceMetadata {
     })
     .unwrap_or((0, 0));
 
-    let pull_request = run_bounded(
-        "gh",
-        &["pr", "view", "--json", "number,title,url,state"],
-        &root,
-        NETWORK_COMMAND_TIMEOUT,
-    )
-    .and_then(|value| serde_json::from_str::<PullRequestMetadata>(&value).ok());
+    let pull_request = resolve_pull_request
+        .then(|| {
+            run_bounded(
+                "gh",
+                &["pr", "view", "--json", "number,title,url,state"],
+                &root,
+                NETWORK_COMMAND_TIMEOUT,
+            )
+            .and_then(|value| serde_json::from_str::<PullRequestMetadata>(&value).ok())
+        })
+        .flatten();
 
     WorkspaceMetadata {
         repository,
@@ -153,7 +157,96 @@ pub async fn get_workspace_metadata(cwd: String) -> Result<WorkspaceMetadata, St
         return Ok(WorkspaceMetadata::default());
     }
 
-    tauri::async_runtime::spawn_blocking(move || inspect_git(&path))
+    tauri::async_runtime::spawn_blocking(move || inspect_git(&path, true))
         .await
         .map_err(|error| format!("workspace metadata task failed: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is before Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("cmux-{name}-{}-{timestamp}", process::id()))
+    }
+
+    fn git(cwd: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git is required for workspace metadata tests");
+        assert!(status.success(), "git command failed: git {}", args.join(" "));
+    }
+
+    fn create_repository() -> PathBuf {
+        let repository = unique_temp_dir("workspace-metadata");
+        fs::create_dir_all(&repository).expect("unable to create temporary repository");
+        git(&repository, &["init"]);
+        git(&repository, &["config", "user.email", "ci@cmux.local"]);
+        git(&repository, &["config", "user.name", "cmux CI"]);
+        fs::write(repository.join("README.md"), "initial\n").expect("unable to create test file");
+        git(&repository, &["add", "README.md"]);
+        git(&repository, &["commit", "-m", "initial"]);
+        git(&repository, &["checkout", "-b", "feature/metadata"]);
+        repository
+    }
+
+    #[test]
+    fn detects_repository_branch_and_dirty_state() {
+        let repository = create_repository();
+
+        let clean = inspect_git(&repository, false);
+        assert!(clean.available);
+        assert_eq!(clean.branch.as_deref(), Some("feature/metadata"));
+        assert!(!clean.dirty);
+        assert_eq!(clean.ahead, 0);
+        assert_eq!(clean.behind, 0);
+        assert!(clean.pull_request.is_none());
+
+        fs::write(repository.join("README.md"), "changed\n").expect("unable to edit test file");
+        let dirty = inspect_git(&repository, false);
+        assert!(dirty.dirty);
+
+        fs::remove_dir_all(repository).expect("unable to remove temporary repository");
+    }
+
+    #[test]
+    fn non_repository_returns_unavailable_metadata() {
+        let directory = unique_temp_dir("not-a-repository");
+        fs::create_dir_all(&directory).expect("unable to create temporary directory");
+
+        let metadata = inspect_git(&directory, false);
+        assert!(!metadata.available);
+        assert!(metadata.repository.is_none());
+
+        fs::remove_dir_all(directory).expect("unable to remove temporary directory");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bounded_command_kills_a_slow_process() {
+        let started = Instant::now();
+        let result = run_bounded(
+            "powershell.exe",
+            &["-NoLogo", "-NoProfile", "-Command", "Start-Sleep -Seconds 10"],
+            &std::env::temp_dir(),
+            Duration::from_millis(200),
+        );
+
+        assert!(result.is_none());
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
 }
