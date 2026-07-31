@@ -9,6 +9,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+if ($env:OS -ne "Windows_NT") {
+    throw "scripts\verify-local.ps1 must run on Windows."
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $manifestPath = Join-Path $repoRoot "src-tauri\Cargo.toml"
 $releaseDirectory = Join-Path $repoRoot "src-tauri\target\release"
@@ -36,6 +40,30 @@ function Invoke-Checked {
     }
 }
 
+function Get-CmuxErrorDescription {
+    param(
+        [Parameter(Mandatory)]$Json,
+        [Parameter(Mandatory)][string]$Fallback
+    )
+
+    $errorCode = "UNKNOWN"
+    $errorMessage = $Fallback
+    $errorProperty = $Json.PSObject.Properties["error"]
+    if ($null -ne $errorProperty -and $null -ne $errorProperty.Value) {
+        $errorObject = $errorProperty.Value
+        $codeProperty = $errorObject.PSObject.Properties["code"]
+        $messageProperty = $errorObject.PSObject.Properties["message"]
+        if ($null -ne $codeProperty -and $codeProperty.Value) {
+            $errorCode = [string]$codeProperty.Value
+        }
+        if ($null -ne $messageProperty -and $messageProperty.Value) {
+            $errorMessage = [string]$messageProperty.Value
+        }
+    }
+
+    "[$errorCode] $errorMessage"
+}
+
 function Invoke-CmuxCli {
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
@@ -53,22 +81,24 @@ function Invoke-CmuxCli {
         throw "cmux-cli returned non-JSON output for '$($Arguments -join ' ')':`n$raw"
     }
 
-    if (-not $AllowFailure -and ($exitCode -ne 0 -or -not $json.ok)) {
-        $errorCode = if ($json.error.code) { $json.error.code } else { "UNKNOWN" }
-        $errorMessage = if ($json.error.message) { $json.error.message } else { $raw }
-        throw "cmux-cli '$($Arguments -join ' ')' failed [$errorCode]: $errorMessage"
+    $okProperty = $json.PSObject.Properties["ok"]
+    $isSuccessful = $null -ne $okProperty -and [bool]$okProperty.Value
+    if (-not $AllowFailure -and ($exitCode -ne 0 -or -not $isSuccessful)) {
+        $description = Get-CmuxErrorDescription -Json $json -Fallback $raw
+        throw "cmux-cli '$($Arguments -join ' ')' failed $description"
     }
 
     [PSCustomObject]@{
         ExitCode = $exitCode
         Json = $json
         Raw = $raw
+        Ok = $isSuccessful
     }
 }
 
 function Wait-ForAutomationUi {
     param(
-        [Parameter(Mandatory)][Diagnostics.Process]$Process,
+        [Parameter(Mandatory)][System.Diagnostics.Process]$Process,
         [Parameter(Mandatory)][datetime]$Deadline
     )
 
@@ -80,15 +110,15 @@ function Wait-ForAutomationUi {
 
         try {
             $ping = Invoke-CmuxCli -Arguments @("ping") -AllowFailure
-            if ($ping.Json.ok) {
+            if ($ping.Ok) {
                 $workspaceList = Invoke-CmuxCli -Arguments @("workspace", "list") -AllowFailure
-                if ($workspaceList.Json.ok) {
+                if ($workspaceList.Ok) {
                     return
                 }
-                $lastFailure = "[$($workspaceList.Json.error.code)] $($workspaceList.Json.error.message)"
+                $lastFailure = Get-CmuxErrorDescription -Json $workspaceList.Json -Fallback $workspaceList.Raw
             }
             else {
-                $lastFailure = "[$($ping.Json.error.code)] $($ping.Json.error.message)"
+                $lastFailure = Get-CmuxErrorDescription -Json $ping.Json -Fallback $ping.Raw
             }
         }
         catch {
