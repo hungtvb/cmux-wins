@@ -5,6 +5,7 @@ use url::Url;
 const MAX_TITLE_CHARS: usize = 120;
 const MAX_CWD_CHARS: usize = 2_048;
 const MAX_IDENTIFIER_CHARS: usize = 128;
+const MAX_BROWSER_URL_CHARS: usize = 4_096;
 const DEFAULT_BROWSER_URL: &str = "https://github.com/";
 
 #[derive(Debug)]
@@ -122,9 +123,9 @@ fn validate_title(value: &str) -> Result<String, MethodError> {
 
 fn validate_cwd(value: &str) -> Result<String, MethodError> {
     let cwd = value.trim();
-    if cwd.chars().count() > MAX_CWD_CHARS || cwd.chars().any(|character| character == '\0') {
+    if cwd.chars().count() > MAX_CWD_CHARS || cwd.chars().any(char::is_control) {
         return Err(MethodError::invalid(format!(
-            "cwd must contain at most {MAX_CWD_CHARS} characters and no NUL bytes"
+            "cwd must contain at most {MAX_CWD_CHARS} characters and no control characters"
         )));
     }
     Ok(cwd.to_owned())
@@ -152,11 +153,24 @@ fn validate_browser_url(value: &str) -> Result<String, MethodError> {
     } else {
         value.trim()
     };
+    if candidate.chars().count() > MAX_BROWSER_URL_CHARS
+        || candidate.chars().any(char::is_control)
+    {
+        return Err(MethodError::invalid(format!(
+            "browser URL must contain at most {MAX_BROWSER_URL_CHARS} characters and no control characters"
+        )));
+    }
+
     let url = Url::parse(candidate)
         .map_err(|error| MethodError::invalid(format!("invalid browser URL: {error}")))?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err(MethodError::invalid(
             "browser URL scheme must be http or https",
+        ));
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(MethodError::invalid(
+            "browser URL must not contain embedded credentials",
         ));
     }
     Ok(url.to_string())
@@ -203,10 +217,24 @@ mod tests {
     }
 
     #[test]
-    fn browser_method_only_accepts_http_or_https() {
+    fn rejects_control_characters_in_working_directory() {
+        assert!(prepare_frontend_method(
+            "workspace.create",
+            json!({ "title": "Agent", "cwd": "C:\\code\nnext" })
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn browser_method_only_accepts_safe_http_or_https() {
         assert!(prepare_frontend_method(
             "pane.createBrowser",
             json!({ "workspaceId": "workspace-1", "url": "javascript:alert(1)" })
+        )
+        .is_err());
+        assert!(prepare_frontend_method(
+            "pane.createBrowser",
+            json!({ "workspaceId": "workspace-1", "url": "https://user:secret@example.com" })
         )
         .is_err());
         assert!(prepare_frontend_method(
