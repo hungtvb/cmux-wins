@@ -1,4 +1,5 @@
 use crate::{
+    automation::events::AutomationEventStore,
     terminal_automation::{
         TerminalAutomationStore, TerminalLifecycleStatus, TerminalReadResult,
     },
@@ -8,6 +9,7 @@ use crate::{
 };
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -94,6 +96,13 @@ fn emit_output(app: &AppHandle, session_id: &str, data: impl Into<String>) {
     );
 }
 
+fn publish_terminal_event(app: &AppHandle, kind: &str, payload: Value) {
+    let store = app.state::<AutomationEventStore>();
+    if let Err(error) = store.publish(kind, payload) {
+        eprintln!("[cmux automation] unable to publish {kind}: {error}");
+    }
+}
+
 #[tauri::command]
 pub(crate) fn spawn_terminal(
     app: AppHandle,
@@ -161,6 +170,7 @@ pub(crate) fn spawn_terminal(
             return Err(error);
         }
     };
+    let started_workspace_id = workspace_id.clone();
     let session = Arc::new(PtySession {
         workspace_id,
         process_id,
@@ -175,6 +185,18 @@ pub(crate) fn spawn_terminal(
         .lock()
         .map_err(|_| "terminal session lock is poisoned".to_owned())?
         .insert(session_id.clone(), session);
+
+    publish_terminal_event(
+        &app,
+        "terminal.started",
+        json!({
+            "sessionId": session_id,
+            "workspaceId": started_workspace_id,
+            "generation": generation,
+            "processId": process_id,
+            "shell": shell,
+        }),
+    );
 
     thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
@@ -229,7 +251,17 @@ pub(crate) fn spawn_terminal(
                 session.generation,
                 TerminalLifecycleStatus::Error,
                 None,
-                Some(error),
+                Some(error.clone()),
+            );
+            publish_terminal_event(
+                &app,
+                "terminal.error",
+                json!({
+                    "sessionId": session_id,
+                    "workspaceId": session.workspace_id,
+                    "generation": session.generation,
+                    "error": error,
+                }),
             );
             return;
         }
@@ -240,20 +272,46 @@ pub(crate) fn spawn_terminal(
             .map_err(|_| "terminal child lock is poisoned".to_owned())
             .and_then(|mut child| child.wait().map_err(|error| error.to_string()));
         match wait_result {
-            Ok(status) => app_state.terminal_automation.finish_session(
-                &session_id,
-                session.generation,
-                TerminalLifecycleStatus::Exited,
-                Some(status.exit_code()),
-                None,
-            ),
-            Err(error) => app_state.terminal_automation.finish_session(
-                &session_id,
-                session.generation,
-                TerminalLifecycleStatus::Error,
-                None,
-                Some(format!("unable to wait for terminal process: {error}")),
-            ),
+            Ok(status) => {
+                let exit_code = status.exit_code();
+                app_state.terminal_automation.finish_session(
+                    &session_id,
+                    session.generation,
+                    TerminalLifecycleStatus::Exited,
+                    Some(exit_code),
+                    None,
+                );
+                publish_terminal_event(
+                    &app,
+                    "terminal.exited",
+                    json!({
+                        "sessionId": session_id,
+                        "workspaceId": session.workspace_id,
+                        "generation": session.generation,
+                        "exitCode": exit_code,
+                    }),
+                );
+            }
+            Err(error) => {
+                let message = format!("unable to wait for terminal process: {error}");
+                app_state.terminal_automation.finish_session(
+                    &session_id,
+                    session.generation,
+                    TerminalLifecycleStatus::Error,
+                    None,
+                    Some(message.clone()),
+                );
+                publish_terminal_event(
+                    &app,
+                    "terminal.error",
+                    json!({
+                        "sessionId": session_id,
+                        "workspaceId": session.workspace_id,
+                        "generation": session.generation,
+                        "error": message,
+                    }),
+                );
+            }
         }
     });
 
@@ -301,6 +359,7 @@ pub(crate) fn resize_terminal(
 
 #[tauri::command]
 pub(crate) fn close_terminal(
+    app: AppHandle,
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<(), String> {
@@ -317,6 +376,15 @@ pub(crate) fn close_terminal(
             TerminalLifecycleStatus::Closed,
             None,
             None,
+        );
+        publish_terminal_event(
+            &app,
+            "terminal.closed",
+            json!({
+                "sessionId": session_id,
+                "workspaceId": session.workspace_id,
+                "generation": session.generation,
+            }),
         );
     }
 
