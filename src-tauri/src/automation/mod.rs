@@ -4,6 +4,7 @@ mod cli_parser;
 #[cfg(windows)]
 pub mod client;
 mod config;
+mod event_methods;
 pub(crate) mod events;
 mod methods;
 mod protocol;
