@@ -1,3 +1,4 @@
+pub mod automation;
 mod browser;
 mod terminal;
 mod workspace_metadata;
@@ -16,6 +17,10 @@ use terminal::{
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .setup(|_| {
+            automation::start_server();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             spawn_terminal,
             write_terminal,
