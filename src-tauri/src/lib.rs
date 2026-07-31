@@ -1,6 +1,7 @@
 pub mod automation;
 mod browser;
 mod terminal;
+mod terminal_automation;
 mod workspace_metadata;
 
 use automation::bridge::{
