@@ -1,9 +1,12 @@
 #![cfg(windows)]
 
 use serde_json::{json, Value};
-use std::{io, process, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{
+    io, process,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::windows::named_pipe::{ClientOptions, NamedPipeClient},
     time::sleep,
 };
@@ -20,9 +23,10 @@ const ERROR_PIPE_BUSY_CODE: i32 = 231;
 pub async fn call(method: &str, params: Value) -> io::Result<AutomationResponse> {
     let config = load()?;
     let mut client = connect(&config.pipe_name).await?;
+    let request_id = request_id();
     let request = AutomationRequest {
         version: PROTOCOL_VERSION,
-        id: request_id(),
+        id: request_id.clone(),
         token: config.token,
         method: method.to_owned(),
         params,
@@ -40,30 +44,31 @@ pub async fn call(method: &str, params: Value) -> io::Result<AutomationResponse>
     client.flush().await?;
 
     let mut reader = BufReader::new(client);
-    let mut line = Vec::new();
-    let read = reader.read_until(b'\n', &mut line).await?;
-    if read == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "automation server closed without a response",
-        ));
-    }
-    if line.len() > MAX_REQUEST_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "automation response exceeds protocol limit",
-        ));
-    }
-
-    while matches!(line.last(), Some(b'\n' | b'\r')) {
-        line.pop();
-    }
-    serde_json::from_slice(&line).map_err(|error| {
+    let line = read_response_line(&mut reader).await?;
+    let response: AutomationResponse = serde_json::from_slice(&line).map_err(|error| {
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("automation server returned invalid JSON: {error}"),
         )
-    })
+    })?;
+
+    if response.version != PROTOCOL_VERSION {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "automation server returned protocol version {}; expected {}",
+                response.version, PROTOCOL_VERSION
+            ),
+        ));
+    }
+    if response.id != request_id {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "automation response correlation ID does not match request",
+        ));
+    }
+
+    Ok(response)
 }
 
 pub async fn run_cli() -> Result<bool, String> {
@@ -92,6 +97,44 @@ pub async fn run_cli() -> Result<bool, String> {
             .map_err(|error| format!("unable to serialize response: {error}"))?
     );
     Ok(response.ok)
+}
+
+async fn read_response_line<R>(reader: &mut R) -> io::Result<Vec<u8>>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut line = Vec::new();
+
+    loop {
+        let buffer = reader.fill_buf().await?;
+        if buffer.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "automation server closed without a complete response",
+            ));
+        }
+
+        let newline = buffer.iter().position(|value| *value == b'\n');
+        let take = newline.map_or(buffer.len(), |index| index + 1);
+        if line.len() + take > MAX_REQUEST_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "automation response exceeds protocol limit",
+            ));
+        }
+
+        line.extend_from_slice(&buffer[..take]);
+        reader.consume(take);
+        if newline.is_some() {
+            while line
+                .last()
+                .is_some_and(|value| matches!(*value, b'\n' | b'\r'))
+            {
+                line.pop();
+            }
+            return Ok(line);
+        }
+    }
 }
 
 async fn connect(pipe_name: &str) -> io::Result<NamedPipeClient> {
