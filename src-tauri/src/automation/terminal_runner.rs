@@ -192,7 +192,8 @@ async fn wait_for_terminal_snapshot(
     session_id: &str,
     run_deadline: Instant,
 ) -> Result<Value, CallFailure> {
-    let readiness_deadline = (Instant::now() + TERMINAL_READY_TIMEOUT).min(run_deadline);
+    let started_at = Instant::now();
+    let readiness_deadline = (started_at + TERMINAL_READY_TIMEOUT).min(run_deadline);
 
     loop {
         match call_result(
@@ -211,9 +212,13 @@ async fn wait_for_terminal_snapshot(
                 sleep(TERMINAL_READY_RETRY_DELAY).await;
             }
             Err(error) if error.code == "TERMINAL_NOT_FOUND" => {
+                let waited = readiness_deadline.saturating_duration_since(started_at);
                 return Err(CallFailure {
                     code: "TERMINAL_NOT_READY".to_owned(),
-                    message: "terminal session did not become ready within five seconds".to_owned(),
+                    message: format!(
+                        "terminal session did not become ready within {} seconds",
+                        waited.as_secs().max(1)
+                    ),
                 });
             }
             Err(error) => return Err(error),
@@ -252,7 +257,7 @@ fn build_powershell_run_input(command: &str, marker: &str) -> Result<String, Str
 
     let encoded_command = STANDARD.encode(command.as_bytes());
     let script = format!(
-        "$__cmuxMarker='{marker}'; $__cmuxCommand=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded_command}')); Write-Output ($__cmuxMarker + ':START'); $__cmuxExit=0; try {{ $global:LASTEXITCODE=0; Invoke-Expression $__cmuxCommand; $__cmuxSucceeded=$?; $__cmuxExternal=$LASTEXITCODE; if (-not $__cmuxSucceeded) {{ $__cmuxExit=1 }} elseif ($null -ne $__cmuxExternal) {{ $__cmuxExit=[int]$__cmuxExternal }} }} catch {{ $__cmuxExit=1; Write-Error $_ }}; Write-Output ($__cmuxMarker + ':END:' + $__cmuxExit)"
+        "$__cmuxMarker='{marker}'; $__cmuxCommand=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded_command}')); Write-Output ($__cmuxMarker + ':START'); $__cmuxExit=0; try {{ $global:LASTEXITCODE=$null; Invoke-Expression $__cmuxCommand; $__cmuxSucceeded=$?; $__cmuxExternal=$LASTEXITCODE; if ($null -ne $__cmuxExternal) {{ $__cmuxExit=[int]$__cmuxExternal }} elseif (-not $__cmuxSucceeded) {{ $__cmuxExit=1 }} }} catch {{ $__cmuxExit=1; Write-Error $_ }}; Write-Output ($__cmuxMarker + ':END:' + $__cmuxExit)"
     );
     let mut utf16 = Vec::with_capacity(script.len() * 2);
     for unit in script.encode_utf16() {
@@ -321,6 +326,14 @@ mod tests {
         assert!(input.starts_with("powershell.exe "));
         assert!(input.ends_with('\r'));
         assert!(input.len() <= 16 * 1024);
+    }
+
+    #[test]
+    fn wrapper_no_longer_overwrites_external_exit_code_with_zero() {
+        let marker = "__CMUX_RUN_TEST__";
+        let input = build_powershell_run_input("cmd /c exit 7", marker)
+            .expect("input should build");
+        assert!(!input.contains("$global:LASTEXITCODE=0"));
     }
 
     #[test]
