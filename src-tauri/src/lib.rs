@@ -4,8 +4,9 @@ mod terminal;
 mod terminal_automation;
 mod workspace_metadata;
 
-use automation::bridge::{
-    resolve_automation_request, set_automation_frontend_ready, AutomationBridge,
+use automation::{
+    bridge::{resolve_automation_request, set_automation_frontend_ready, AutomationBridge},
+    events::{publish_frontend_automation_events, AutomationEventStore},
 };
 use browser::{
     browser_go_back, browser_go_forward, close_browser_pane, create_browser_pane,
@@ -22,6 +23,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
         .manage(AutomationBridge::default())
+        .manage(AutomationEventStore::default())
         .setup(|app| {
             automation::start_server(app.handle().clone());
             Ok(())
@@ -42,7 +44,8 @@ pub fn run() {
             close_browser_pane,
             get_workspace_metadata_batch,
             set_automation_frontend_ready,
-            resolve_automation_request
+            resolve_automation_request,
+            publish_frontend_automation_events
         ])
         .run(tauri::generate_context!())
         .expect("error while running cmux Windows");
