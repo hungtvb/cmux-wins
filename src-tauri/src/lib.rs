@@ -3,6 +3,7 @@ mod browser;
 mod terminal;
 mod workspace_metadata;
 
+use automation::bridge::{resolve_automation_request, AutomationBridge};
 use browser::{
     browser_go_back, browser_go_forward, close_browser_pane, create_browser_pane,
     hide_browser_pane, navigate_browser_pane, reload_browser_pane, set_browser_pane_bounds,
@@ -17,8 +18,9 @@ use terminal::{
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
-        .setup(|_| {
-            automation::start_server();
+        .manage(AutomationBridge::default())
+        .setup(|app| {
+            automation::start_server(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,7 +37,8 @@ pub fn run() {
             show_browser_pane,
             hide_browser_pane,
             close_browser_pane,
-            get_workspace_metadata_batch
+            get_workspace_metadata_batch,
+            resolve_automation_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running cmux Windows");
