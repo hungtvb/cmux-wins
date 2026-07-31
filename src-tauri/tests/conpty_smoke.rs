@@ -10,7 +10,7 @@ use std::{
 };
 
 const READY_MARKER: &str = "CMUX_PTY_READY";
-const TEST_TIMEOUT: Duration = Duration::from_secs(15);
+const TEST_TIMEOUT: Duration = Duration::from_secs(12);
 
 fn command_exists(command: &str) -> bool {
     Command::new("where.exe")
@@ -65,23 +65,20 @@ fn run_round_trip(shell: &str) {
     drop(pair.slave);
 
     let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
-    let reader_thread = thread::spawn(move || {
-        let mut complete_output = Vec::new();
+    thread::spawn(move || {
         let mut buffer = [0_u8; 4096];
 
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(count) => {
-                    let chunk = buffer[..count].to_vec();
-                    complete_output.extend_from_slice(&chunk);
-                    let _ = output_tx.send(chunk);
+                    if output_tx.send(buffer[..count].to_vec()).is_err() {
+                        break;
+                    }
                 }
                 Err(_) => break,
             }
         }
-
-        complete_output
     });
 
     master
@@ -131,16 +128,17 @@ fn run_round_trip(shell: &str) {
         let _ = child.wait();
     }
 
+    // Never join the blocking PTY reader. Dropping all PTY/process handles
+    // makes it exit naturally, while avoiding an unbounded CI hang if a
+    // Windows console driver delays EOF delivery.
     drop(writer);
     drop(master);
+    drop(child);
+    drop(output_rx);
 
-    let complete_output = reader_thread
-        .join()
-        .expect("PTY reader thread panicked during smoke test");
-    let output_text = String::from_utf8_lossy(&complete_output);
-
+    let output_text = String::from_utf8_lossy(&observed);
     assert!(
-        marker_seen || output_text.contains(READY_MARKER),
+        marker_seen,
         "{shell} did not return the input/output marker. Output: {output_text}"
     );
     assert!(exited, "{shell} did not exit within {TEST_TIMEOUT:?}");
