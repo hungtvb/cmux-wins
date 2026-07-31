@@ -122,10 +122,10 @@ fn run_round_trip(shell: &str) {
         .expect("unable to request shell exit");
     writer.flush().expect("unable to flush shell exit");
 
-    let exited = wait_for_exit(&mut child);
-    if !exited {
+    let clean_exit = wait_for_exit(&mut child);
+    if !clean_exit {
         let _ = child.kill();
-        let _ = child.wait();
+        let _ = wait_for_exit(&mut child);
     }
 
     // Never join the blocking PTY reader. Dropping all PTY/process handles
@@ -141,7 +141,10 @@ fn run_round_trip(shell: &str) {
         marker_seen,
         "{shell} did not return the input/output marker. Output: {output_text}"
     );
-    assert!(exited, "{shell} did not exit within {TEST_TIMEOUT:?}");
+    assert!(
+        clean_exit,
+        "{shell} did not exit cleanly within {TEST_TIMEOUT:?}"
+    );
 }
 
 #[test]
