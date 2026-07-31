@@ -81,7 +81,7 @@ function BrowserPaneComponent({
 
     const pendingCreation = creationRef.current;
     if (pendingCreation) {
-      void pendingCreation.finally(close);
+      void pendingCreation.then(close, close);
     } else {
       void close();
     }
@@ -134,13 +134,13 @@ function BrowserPaneComponent({
     };
 
     try {
-      const wasCreated = createdRef.current;
       await ensureCreated(bounds);
       if (disposedRef.current || !createdRef.current) return;
 
-      if (wasCreated) {
-        await invoke("set_browser_pane_bounds", bounds);
-      }
+      // Always apply the latest measurement after creation. Multiple resize
+      // callbacks may share the same create promise and the first callback's
+      // bounds must not overwrite a later layout.
+      await invoke("set_browser_pane_bounds", bounds);
       setError(null);
     } catch (cause) {
       if (!disposedRef.current) setError(String(cause));
