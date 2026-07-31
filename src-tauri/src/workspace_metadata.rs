@@ -2,13 +2,14 @@ use serde::{Deserialize, Serialize};
 use std::{
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
 
 const LOCAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const NETWORK_COMMAND_TIMEOUT: Duration = Duration::from_secs(4);
+const TERMINATION_GRACE: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,6 +32,18 @@ pub struct WorkspaceMetadata {
     pub pull_request: Option<PullRequestMetadata>,
     pub listening_ports: Vec<u16>,
     pub available: bool,
+}
+
+fn terminate_bounded(child: &mut Child) {
+    let _ = child.kill();
+    let deadline = Instant::now() + TERMINATION_GRACE;
+
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => thread::sleep(Duration::from_millis(25)),
+        }
+    }
 }
 
 fn run_bounded(
@@ -56,8 +69,7 @@ fn run_bounded(
             Some(status) => break status,
             None if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
             None => {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_bounded(&mut child);
                 return None;
             }
         }
