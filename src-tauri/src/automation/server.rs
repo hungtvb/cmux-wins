@@ -1,29 +1,25 @@
 #![cfg(windows)]
 
-use crate::terminal::AppState;
-use serde_json::{json, to_value};
-use std::{io, process, time::Duration};
-use tauri::{AppHandle, Manager};
+use std::{io, sync::Arc, time::Duration};
+use tauri::AppHandle;
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::windows::named_pipe::{NamedPipeServer, ServerOptions},
+    sync::Semaphore,
     time::timeout,
 };
 
 use super::{
-    bridge::{request as bridge_request, AutomationBridge},
     config::{load_or_create, pipe_name_for_sid},
-    methods::prepare_frontend_method,
-    protocol::{
-        token_matches, validate_request, AutomationRequest, AutomationResponse,
-        MAX_REQUEST_BYTES, PROTOCOL_VERSION,
-    },
+    dispatch::dispatch,
+    protocol::{AutomationResponse, MAX_REQUEST_BYTES},
     security::SecurityDescriptor,
-    terminal_methods::{prepare_terminal_method, PreparedTerminalMethod},
 };
 
 const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REQUESTS_PER_CONNECTION: usize = 128;
+const MAX_CONCURRENT_CLIENTS: usize = 64;
+const MAX_PIPE_INSTANCES: usize = MAX_CONCURRENT_CLIENTS + 1;
 
 pub async fn run(app: AppHandle) -> io::Result<()> {
     let (sid, mut first_descriptor) = SecurityDescriptor::for_current_user()?;
@@ -35,14 +31,23 @@ pub async fn run(app: AppHandle) -> io::Result<()> {
     )?;
     drop(first_descriptor);
 
-    // The first pipe instance is created before publishing the token file so a
-    // second process cannot win a config-file race and impersonate the endpoint.
+    // Create the first pipe instance before publishing endpoint discovery so a
+    // second process cannot win a config-file race and impersonate cmux.
     let config = load_or_create(&pipe_name)?;
+    let client_limit = Arc::new(Semaphore::new(MAX_CONCURRENT_CLIENTS));
     let mut server = first_server;
 
     loop {
         server.connect().await?;
         let connected = server;
+
+        // A connected client may wait here, but no more than 64 handlers run
+        // concurrently. The extra named-pipe instance is reserved for listening.
+        let permit = client_limit
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(io::Error::other)?;
 
         let mut descriptor = SecurityDescriptor::for_sid(&sid)?;
         server = create_server_instance(
@@ -55,6 +60,7 @@ pub async fn run(app: AppHandle) -> io::Result<()> {
         let token = config.token.clone();
         let client_app = app.clone();
         tokio::spawn(async move {
+            let _permit = permit;
             if let Err(error) = handle_client(connected, &token, Some(client_app)).await {
                 eprintln!("[cmux automation] client connection failed: {error}");
             }
@@ -72,7 +78,8 @@ fn create_server_instance(
         .first_pipe_instance(first)
         .reject_remote_clients(true)
         .access_inbound(true)
-        .access_outbound(true);
+        .access_outbound(true)
+        .max_instances(MAX_PIPE_INSTANCES);
 
     unsafe { options.create_with_security_attributes_raw(pipe_name, security_attributes) }
 }
@@ -101,7 +108,7 @@ where
 
         let newline = buffer.iter().position(|value| *value == b'\n');
         let take = newline.map_or(buffer.len(), |index| index + 1);
-        if line.len() + take > MAX_REQUEST_BYTES {
+        if line.len().saturating_add(take) > MAX_REQUEST_BYTES {
             reader.consume(take);
             return Ok(RequestLine::TooLarge);
         }
@@ -159,156 +166,9 @@ async fn handle_client(
     Ok(())
 }
 
-async fn dispatch(
-    line: &[u8],
-    expected_token: &str,
-    app: Option<&AppHandle>,
-) -> AutomationResponse {
-    let request: AutomationRequest = match serde_json::from_slice(line) {
-        Ok(request) => request,
-        Err(error) => {
-            return AutomationResponse::failure(
-                "",
-                "INVALID_JSON",
-                format!("request is not valid JSON: {error}"),
-            )
-        }
-    };
-
-    if let Err(response) = validate_request(&request) {
-        return response;
-    }
-
-    if !token_matches(expected_token, &request.token) {
-        return AutomationResponse::failure(
-            request.id,
-            "UNAUTHORIZED",
-            "automation token is not valid",
-        );
-    }
-
-    let request_id = request.id;
-    let method = request.method;
-    let params = request.params;
-
-    match method.as_str() {
-        "ping" => AutomationResponse::success(request_id, json!({ "pong": true })),
-        "app.info" => AutomationResponse::success(
-            request_id,
-            json!({
-                "appVersion": env!("CARGO_PKG_VERSION"),
-                "protocolVersion": PROTOCOL_VERSION,
-                "processId": process::id(),
-            }),
-        ),
-        _ => match prepare_terminal_method(&method, params.clone()) {
-            Err(error) => AutomationResponse::failure(request_id, error.code, error.message),
-            Ok(Some(prepared)) => dispatch_terminal_method(request_id, app, prepared).await,
-            Ok(None) => dispatch_frontend_method(request_id, app, &method, params).await,
-        },
-    }
-}
-
-async fn dispatch_terminal_method(
-    request_id: String,
-    app: Option<&AppHandle>,
-    prepared: PreparedTerminalMethod,
-) -> AutomationResponse {
-    let Some(app) = app else {
-        return AutomationResponse::failure(
-            request_id,
-            "INTERNAL_ERROR",
-            "terminal automation state is not available",
-        );
-    };
-    let state = app.state::<AppState>();
-
-    match prepared {
-        PreparedTerminalMethod::Write { session_id, data } => {
-            match state.automation_write_terminal(&session_id, &data) {
-                Ok(bytes_written) => AutomationResponse::success(
-                    request_id,
-                    json!({
-                        "sessionId": session_id,
-                        "bytesWritten": bytes_written,
-                    }),
-                ),
-                Err(error) => AutomationResponse::failure(
-                    request_id,
-                    terminal_error_code(&error),
-                    error,
-                ),
-            }
-        }
-        PreparedTerminalMethod::Read {
-            session_id,
-            after_seq,
-            max_bytes,
-            wait_ms,
-        } => match state
-            .automation_read_terminal(&session_id, after_seq, max_bytes, wait_ms)
-            .await
-        {
-            Ok(result) => match to_value(result) {
-                Ok(value) => AutomationResponse::success(request_id, value),
-                Err(error) => AutomationResponse::failure(
-                    request_id,
-                    "INTERNAL_ERROR",
-                    format!("unable to serialize terminal output: {error}"),
-                ),
-            },
-            Err(error) => AutomationResponse::failure(
-                request_id,
-                terminal_error_code(&error),
-                error,
-            ),
-        },
-    }
-}
-
-async fn dispatch_frontend_method(
-    request_id: String,
-    app: Option<&AppHandle>,
-    method: &str,
-    params: serde_json::Value,
-) -> AutomationResponse {
-    match prepare_frontend_method(method, params) {
-        Err(error) => AutomationResponse::failure(request_id, error.code, error.message),
-        Ok(None) => AutomationResponse::failure(
-            request_id,
-            "METHOD_NOT_FOUND",
-            "unsupported automation method",
-        ),
-        Ok(Some(params)) => {
-            let Some(app) = app else {
-                return AutomationResponse::failure(
-                    request_id,
-                    "INTERNAL_ERROR",
-                    "workspace bridge is not available",
-                );
-            };
-            let bridge = app.state::<AutomationBridge>();
-            match bridge_request(app, bridge.inner(), method, params).await {
-                Ok(result) => AutomationResponse::success(request_id, result),
-                Err(error) => AutomationResponse::failure(request_id, error.code, error.message),
-            }
-        }
-    }
-}
-
-fn terminal_error_code(error: &str) -> &'static str {
-    if error.starts_with("terminal session not found:") {
-        "TERMINAL_NOT_FOUND"
-    } else if error.contains("poisoned") {
-        "INTERNAL_ERROR"
-    } else {
-        "TERMINAL_IO_ERROR"
-    }
-}
-
 fn encode_response(response: &AutomationResponse) -> io::Result<Vec<u8>> {
     let mut encoded = serde_json::to_vec(response).map_err(io::Error::other)?;
-    if encoded.len() + 1 > MAX_REQUEST_BYTES {
+    if encoded.len().saturating_add(1) > MAX_REQUEST_BYTES {
         let fallback = AutomationResponse::failure(
             response.id.clone(),
             "RESPONSE_TOO_LARGE",
@@ -332,8 +192,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use serde_json::{json, Value};
+    use std::{
+        process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
     use tokio::{
         io::{AsyncBufReadExt, AsyncWriteExt},
         net::windows::named_pipe::ClientOptions,
@@ -341,79 +204,15 @@ mod tests {
 
     const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
-    fn request(method: &str, token: &str) -> Vec<u8> {
+    fn request(method: &str, id: &str) -> Vec<u8> {
         serde_json::to_vec(&json!({
             "version": 1,
-            "id": "request-1",
-            "token": token,
+            "id": id,
+            "token": TOKEN,
             "method": method,
-            "params": {}
+            "params": {},
         }))
         .expect("request should serialize")
-    }
-
-    #[tokio::test]
-    async fn ping_requires_valid_token() {
-        let denied = dispatch(&request("ping", &"b".repeat(64)), TOKEN, None).await;
-        assert!(!denied.ok);
-        assert_eq!(denied.error.expect("missing error").code, "UNAUTHORIZED");
-
-        let allowed = dispatch(&request("ping", TOKEN), TOKEN, None).await;
-        assert!(allowed.ok);
-        assert_eq!(
-            allowed
-                .result
-                .and_then(|value| value.get("pong").cloned()),
-            Some(Value::Bool(true))
-        );
-    }
-
-    #[tokio::test]
-    async fn terminal_methods_require_runtime_state() {
-        let request = serde_json::to_vec(&json!({
-            "version": 1,
-            "id": "request-1",
-            "token": TOKEN,
-            "method": "terminal.read",
-            "params": { "sessionId": "pane-1" }
-        }))
-        .expect("request should serialize");
-        let response = dispatch(&request, TOKEN, None).await;
-        assert!(!response.ok);
-        assert_eq!(response.error.expect("missing error").code, "INTERNAL_ERROR");
-    }
-
-    #[tokio::test]
-    async fn unknown_methods_are_rejected() {
-        let response = dispatch(&request("shell.exec", TOKEN), TOKEN, None).await;
-        assert!(!response.ok);
-        assert_eq!(
-            response.error.expect("missing error").code,
-            "METHOD_NOT_FOUND"
-        );
-    }
-
-    #[tokio::test]
-    async fn malformed_json_is_rejected_without_panicking() {
-        let response = dispatch(b"{not-json", TOKEN, None).await;
-        assert!(!response.ok);
-        assert_eq!(response.error.expect("missing error").code, "INVALID_JSON");
-    }
-
-    #[test]
-    fn classifies_terminal_errors_without_leaking_internal_codes() {
-        assert_eq!(
-            terminal_error_code("terminal session not found: pane-1"),
-            "TERMINAL_NOT_FOUND"
-        );
-        assert_eq!(
-            terminal_error_code("terminal writer lock is poisoned"),
-            "INTERNAL_ERROR"
-        );
-        assert_eq!(
-            terminal_error_code("unable to write to terminal: broken pipe"),
-            "TERMINAL_IO_ERROR"
-        );
     }
 
     #[test]
@@ -439,41 +238,102 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn current_user_named_pipe_round_trip_ping() {
+    async fn client_limit_blocks_until_a_permit_is_released() {
+        let limit = Arc::new(Semaphore::new(2));
+        let first = limit.clone().acquire_owned().await.expect("first permit");
+        let second = limit.clone().acquire_owned().await.expect("second permit");
+        assert!(timeout(Duration::from_millis(20), limit.clone().acquire_owned())
+            .await
+            .is_err());
+        drop(first);
+        let third = timeout(Duration::from_secs(1), limit.clone().acquire_owned())
+            .await
+            .expect("third permit should wake")
+            .expect("semaphore should remain open");
+        drop(second);
+        drop(third);
+    }
+
+    #[tokio::test]
+    async fn current_user_named_pipe_supports_multiple_requests_and_reconnect() {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock is before Unix epoch")
             .as_nanos();
         let pipe_name = format!(r"\\.\pipe\cmux-automation-test-{}-{nanos}", process::id());
-        let (_, mut descriptor) =
+        let (_, mut first_descriptor) =
             SecurityDescriptor::for_current_user().expect("descriptor should build");
-        let server = create_server_instance(
+        let first_server = create_server_instance(
             &pipe_name,
             true,
-            descriptor.as_raw_attributes(),
+            first_descriptor.as_raw_attributes(),
         )
-        .expect("server pipe should be created");
-        drop(descriptor);
+        .expect("first server pipe should be created");
+        drop(first_descriptor);
 
+        let server_pipe_name = pipe_name.clone();
         let server_task = tokio::spawn(async move {
-            server.connect().await.expect("server should connect");
-            handle_client(server, TOKEN, None)
-                .await
-                .expect("server should handle client");
+            let mut server = first_server;
+            for _ in 0..2 {
+                server.connect().await.expect("server should connect");
+                let connected = server;
+                let (_, mut descriptor) =
+                    SecurityDescriptor::for_current_user().expect("descriptor should build");
+                server = create_server_instance(
+                    &server_pipe_name,
+                    false,
+                    descriptor.as_raw_attributes(),
+                )
+                .expect("next server should be created");
+                drop(descriptor);
+                handle_client(connected, TOKEN, None)
+                    .await
+                    .expect("server should handle client");
+            }
         });
 
-        let mut client = ClientOptions::new()
+        let mut first_client = ClientOptions::new()
             .open(&pipe_name)
-            .expect("client should open current-user pipe");
-        let mut encoded = request("ping", TOKEN);
+            .expect("first client should open current-user pipe");
+        for (index, id) in ["request-1", "request-2"].into_iter().enumerate() {
+            let mut encoded = request("ping", id);
+            encoded.push(b'\n');
+            first_client
+                .write_all(&encoded)
+                .await
+                .expect("client should write request");
+            first_client.flush().await.expect("client should flush");
+
+            let mut reader = BufReader::new(&mut first_client);
+            let mut line = Vec::new();
+            timeout(Duration::from_secs(5), reader.read_until(b'\n', &mut line))
+                .await
+                .expect("response timed out")
+                .expect("response read failed");
+            let response: AutomationResponse =
+                serde_json::from_slice(&line).expect("response should be valid JSON");
+            assert!(response.ok, "request {index} should succeed");
+            assert_eq!(response.id, id);
+            assert_eq!(
+                response
+                    .result
+                    .and_then(|value| value.get("pong").cloned()),
+                Some(Value::Bool(true))
+            );
+        }
+        drop(first_client);
+
+        let mut second_client = ClientOptions::new()
+            .open(&pipe_name)
+            .expect("second client should reconnect");
+        let mut encoded = request("ping", "request-3");
         encoded.push(b'\n');
-        client
+        second_client
             .write_all(&encoded)
             .await
-            .expect("client should write request");
-        client.flush().await.expect("client should flush request");
-
-        let mut reader = BufReader::new(client);
+            .expect("second client should write");
+        second_client.flush().await.expect("second client should flush");
+        let mut reader = BufReader::new(second_client);
         let mut line = Vec::new();
         timeout(Duration::from_secs(5), reader.read_until(b'\n', &mut line))
             .await
@@ -482,6 +342,7 @@ mod tests {
         let response: AutomationResponse =
             serde_json::from_slice(&line).expect("response should be valid JSON");
         assert!(response.ok);
+        assert_eq!(response.id, "request-3");
 
         drop(reader);
         timeout(Duration::from_secs(5), server_task)
