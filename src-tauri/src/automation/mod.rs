@@ -8,6 +8,7 @@ mod protocol;
 mod security;
 #[cfg(windows)]
 mod server;
+mod terminal_methods;
 
 #[cfg(windows)]
 pub fn start_server(app: tauri::AppHandle) {
