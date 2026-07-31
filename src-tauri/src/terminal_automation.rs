@@ -82,10 +82,11 @@ impl TerminalAutomationStore {
             .state
             .lock()
             .map_err(|_| "terminal automation store is poisoned".to_owned())?;
-        prune_records(&mut state);
-        if !state.records.contains_key(session_id)
-            && state.records.len() >= MAX_TERMINAL_RECORDS
-        {
+        let replacing_existing = state.records.contains_key(session_id);
+        if !replacing_existing && state.records.len() >= MAX_TERMINAL_RECORDS {
+            prune_completed_for_capacity(&mut state);
+        }
+        if !replacing_existing && state.records.len() >= MAX_TERMINAL_RECORDS {
             return Err(format!(
                 "terminal automation record limit reached: {MAX_TERMINAL_RECORDS}"
             ));
@@ -170,7 +171,6 @@ impl TerminalAutomationStore {
         record.status = status;
         record.exit_code = exit_code;
         record.error = error;
-        prune_records(&mut state);
         drop(state);
         self.changed.notify_waiters();
     }
@@ -282,11 +282,7 @@ fn split_utf8_chunks(value: &str, max_bytes: usize) -> Vec<&str> {
     chunks
 }
 
-fn prune_records(state: &mut StoreState) {
-    if state.records.len() < MAX_TERMINAL_RECORDS {
-        return;
-    }
-
+fn prune_completed_for_capacity(state: &mut StoreState) {
     let mut attempts = state.order.len();
     while state.records.len() >= MAX_TERMINAL_RECORDS && attempts > 0 {
         attempts -= 1;
@@ -365,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_record_is_pruned_to_make_room() {
+    fn completed_record_is_retained_until_capacity_is_needed() {
         let store = TerminalAutomationStore::default();
         let first_generation = store
             .begin_session("pane-0", "workspace-1")
@@ -382,9 +378,16 @@ mod tests {
             Some(0),
             None,
         );
+        assert_eq!(
+            store
+                .snapshot("pane-0", 0, MAX_READ_BYTES)
+                .expect("completed transcript should remain")
+                .status,
+            TerminalLifecycleStatus::Exited
+        );
         store
             .begin_session("pane-replacement", "workspace-1")
-            .expect("completed record should be pruned");
+            .expect("completed record should be pruned for capacity");
         assert!(store.snapshot("pane-0", 0, MAX_READ_BYTES).is_err());
     }
 
