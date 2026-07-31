@@ -3,6 +3,7 @@ import { memo, useCallback } from "react";
 import { useTerminalSession } from "../hooks/useTerminalSession";
 
 type TerminalPaneProps = {
+  workspaceId: string;
   sessionId: string;
   title: string;
   cwd: string;
@@ -13,6 +14,7 @@ type TerminalPaneProps = {
 };
 
 function TerminalPaneComponent({
+  workspaceId,
   sessionId,
   title,
   cwd,
@@ -30,6 +32,7 @@ function TerminalPaneComponent({
     [onTitleChange, sessionId],
   );
   const hostRef = useTerminalSession({
+    workspaceId,
     sessionId,
     cwd,
     onAttention: handleAttention,
