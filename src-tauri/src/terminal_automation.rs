@@ -11,7 +11,7 @@ pub(crate) const MAX_TERMINAL_RECORDS: usize = 128;
 pub(crate) const MIN_READ_BYTES: usize = 1024;
 pub(crate) const MAX_READ_BYTES: usize = 8 * 1024;
 pub(crate) const MAX_WAIT_MS: u64 = 30_000;
-const MAX_STORED_CHUNK_BYTES: usize = 4 * 1024;
+const MAX_STORED_CHUNK_BYTES: usize = MIN_READ_BYTES;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -309,8 +309,8 @@ mod tests {
         let generation = store
             .begin_session("pane-1", "workspace-1")
             .expect("session should begin");
-        for index in 0..80 {
-            store.record_output("pane-1", generation, format!("{index}:{}", "x".repeat(4096)));
+        for index in 0..320 {
+            store.record_output("pane-1", generation, format!("{index}:{}", "x".repeat(1024)));
         }
 
         let first = store
@@ -326,6 +326,20 @@ mod tests {
             .snapshot("pane-1", first.next_seq, MAX_READ_BYTES)
             .expect("next snapshot should work");
         assert!(next.chunks.iter().all(|chunk| chunk.seq > first.next_seq));
+    }
+
+    #[test]
+    fn minimum_read_window_accepts_every_stored_chunk() {
+        let store = TerminalAutomationStore::default();
+        let generation = store
+            .begin_session("pane-1", "workspace-1")
+            .expect("session should begin");
+        store.record_output("pane-1", generation, "x".repeat(4096));
+        let snapshot = store
+            .snapshot("pane-1", 0, MIN_READ_BYTES)
+            .expect("minimum read should work");
+        assert!(!snapshot.chunks.is_empty());
+        assert!(snapshot.chunks.iter().all(|chunk| chunk.data.len() <= MIN_READ_BYTES));
     }
 
     #[test]
