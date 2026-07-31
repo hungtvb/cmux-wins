@@ -17,8 +17,10 @@ Terminal access is powerful: a caller authorized to the local automation pipe ca
 Each terminal session keeps a ring buffer with these limits:
 
 - 256 KiB total transcript per session
-- UTF-8 chunks of at most 4 KiB
-- maximum 128 retained terminal records; running records are never evicted
+- UTF-8 chunks of at most 1 KiB
+- maximum 128 retained terminal records
+- completed records remain readable until capacity is required
+- running records are never evicted; a new session is rejected if all 128 slots are active
 - read payload from 1 KiB to 8 KiB
 - long-poll wait from 0 to 30 seconds
 
@@ -140,12 +142,15 @@ cmux-cli terminal run <session-id> "Write-Output hello" --timeout 60
 
 `terminal run` performs these steps:
 
-1. Reads `latestSeq` before sending input.
-2. Builds a nested `powershell.exe -EncodedCommand` invocation.
-3. Writes random start/end markers that are not present in plain text in the echoed command line.
-4. Long-polls output from the saved cursor.
-5. Returns output and exit code when the end marker is observed.
-6. Fails if output is dropped, the terminal exits, capture exceeds the local bound, or timeout is reached.
+1. Waits up to five seconds for a newly created pane to mount its terminal session.
+2. Reads `latestSeq` before sending input.
+3. Builds a nested `powershell.exe -EncodedCommand` invocation.
+4. Writes random start/end markers that are not present in plain text in the echoed command line.
+5. Long-polls output from the saved cursor.
+6. Returns output and exit code when the end marker is observed.
+7. Fails if output is dropped, the terminal exits, capture exceeds the local bound, or timeout is reached.
+
+Commands are limited to 3 KiB of UTF-8 input. This guarantees the encoded PowerShell invocation remains below the 16 KiB `terminal.write` limit.
 
 Example result:
 
@@ -171,6 +176,7 @@ A completed command with a non-zero `exitCode` produces JSON with `ok: true`, bu
 New codes in this slice:
 
 - `TERMINAL_NOT_FOUND`
+- `TERMINAL_NOT_READY`
 - `TERMINAL_IO_ERROR`
 - `TERMINAL_RUN_FAILED`
 - `TERMINAL_RUN_TIMEOUT`
@@ -179,6 +185,7 @@ New codes in this slice:
 - `TERMINAL_EXITED`
 - `INVALID_COMMAND`
 - `INVALID_RESPONSE`
+- `CLIENT_ERROR`
 
 ## Deferred
 
