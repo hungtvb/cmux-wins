@@ -164,8 +164,10 @@ mod tests {
 
     #[test]
     fn rejects_non_sid_sddl_input() {
-        let error = SecurityDescriptor::for_sid("S-1-5-21);(A;;GA;;;WD")
-            .expect_err("injected SID text must be rejected");
+        let error = match SecurityDescriptor::for_sid("S-1-5-21);(A;;GA;;;WD") {
+            Ok(_) => panic!("injected SID text must be rejected"),
+            Err(error) => error,
+        };
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 }
