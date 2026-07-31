@@ -79,7 +79,7 @@ export default function App() {
   const [attention, setAttention] = useState<Record<string, string>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
-  const metadataByWorkspace = useWorkspaceMetadata(workspaces);
+  const metadataByWorkspace = useWorkspaceMetadata(workspaces, activeWorkspaceId);
 
   const activeWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0],
