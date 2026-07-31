@@ -11,6 +11,7 @@ import {
 } from "react";
 
 const DEFAULT_URL = "https://github.com";
+const EXPLICIT_SCHEME = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
 
 type BrowserPaneProps = {
   paneId: string;
@@ -21,20 +22,25 @@ type BrowserPaneProps = {
   onClose: (paneId: string) => void;
 };
 
+type BrowserBounds = {
+  paneId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 function normalizeUrl(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return DEFAULT_URL;
 
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return parsed.toString();
-    }
-  } catch {
-    // Fall through and prepend https:// below.
+  const candidate = EXPLICIT_SCHEME.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const parsed = new URL(candidate);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`Browser URL scheme is not allowed: ${parsed.protocol}`);
   }
 
-  return new URL(`https://${trimmed}`).toString();
+  return parsed.toString();
 }
 
 function BrowserPaneComponent({
@@ -49,6 +55,9 @@ function BrowserPaneComponent({
   const urlRef = useRef(url);
   const activeRef = useRef(active);
   const createdRef = useRef(false);
+  const disposedRef = useRef(false);
+  const closeRequestedRef = useRef(false);
+  const creationRef = useRef<Promise<void> | null>(null);
   const [draftUrl, setDraftUrl] = useState(url);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,41 +70,89 @@ function BrowserPaneComponent({
     activeRef.current = active;
   }, [active]);
 
+  const closeNativePane = useCallback(() => {
+    if (closeRequestedRef.current) return;
+    closeRequestedRef.current = true;
+
+    const close = () =>
+      invoke("close_browser_pane", { paneId }).catch(() => {
+        // Closing is idempotent; there is no useful recovery after unmount.
+      });
+
+    const pendingCreation = creationRef.current;
+    if (pendingCreation) {
+      void pendingCreation.finally(close);
+    } else {
+      void close();
+    }
+  }, [paneId]);
+
+  const ensureCreated = useCallback(
+    async (bounds: BrowserBounds) => {
+      if (createdRef.current) return;
+      if (disposedRef.current) throw new Error("Browser pane was disposed during creation");
+
+      if (!creationRef.current) {
+        creationRef.current = invoke("create_browser_pane", {
+          ...bounds,
+          url: urlRef.current,
+        })
+          .then(async () => {
+            if (disposedRef.current) {
+              await invoke("close_browser_pane", { paneId });
+              return;
+            }
+
+            createdRef.current = true;
+            if (!activeRef.current) {
+              await invoke("hide_browser_pane", { paneId });
+            }
+          })
+          .finally(() => {
+            creationRef.current = null;
+          });
+      }
+
+      await creationRef.current;
+    },
+    [paneId],
+  );
+
   const syncBounds = useCallback(async () => {
     const host = hostRef.current;
-    if (!host) return;
+    if (!host || disposedRef.current) return;
 
-    const bounds = host.getBoundingClientRect();
-    if (bounds.width < 2 || bounds.height < 2) return;
+    const rect = host.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return;
 
-    const payload = {
+    const bounds: BrowserBounds = {
       paneId,
-      x: Math.round(bounds.x),
-      y: Math.round(bounds.y),
-      width: Math.round(bounds.width),
-      height: Math.round(bounds.height),
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
     };
 
     try {
-      if (!createdRef.current) {
-        await invoke("create_browser_pane", { ...payload, url: urlRef.current });
-        createdRef.current = true;
-        if (!activeRef.current) {
-          await invoke("hide_browser_pane", { paneId });
-        }
-      } else {
-        await invoke("set_browser_pane_bounds", payload);
+      const wasCreated = createdRef.current;
+      await ensureCreated(bounds);
+      if (disposedRef.current || !createdRef.current) return;
+
+      if (wasCreated) {
+        await invoke("set_browser_pane_bounds", bounds);
       }
       setError(null);
     } catch (cause) {
-      setError(String(cause));
+      if (!disposedRef.current) setError(String(cause));
     }
-  }, [paneId]);
+  }, [ensureCreated, paneId]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
+    disposedRef.current = false;
+    closeRequestedRef.current = false;
     let animationFrame = 0;
     const scheduleSync = () => {
       cancelAnimationFrame(animationFrame);
@@ -108,13 +165,14 @@ function BrowserPaneComponent({
     scheduleSync();
 
     return () => {
+      disposedRef.current = true;
       cancelAnimationFrame(animationFrame);
       observer.disconnect();
       window.removeEventListener("resize", scheduleSync);
       createdRef.current = false;
-      void invoke("close_browser_pane", { paneId });
+      closeNativePane();
     };
-  }, [paneId, syncBounds]);
+  }, [closeNativePane, syncBounds]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -123,24 +181,28 @@ function BrowserPaneComponent({
       return;
     }
 
-    void invoke(active ? "show_browser_pane" : "hide_browser_pane", { paneId }).catch((cause) =>
-      setError(String(cause)),
-    );
+    void invoke(active ? "show_browser_pane" : "hide_browser_pane", { paneId }).catch((cause) => {
+      if (!disposedRef.current) setError(String(cause));
+    });
     if (active) void syncBounds();
   }, [active, paneId, syncBounds]);
 
   const navigate = useCallback(
     async (nextValue: string) => {
-      const nextUrl = normalizeUrl(nextValue);
       try {
-        if (!createdRef.current) await syncBounds();
+        const nextUrl = normalizeUrl(nextValue);
+        await syncBounds();
+        if (!createdRef.current || disposedRef.current) {
+          throw new Error("Browser pane is not available");
+        }
+
         await invoke("navigate_browser_pane", { paneId, url: nextUrl });
         urlRef.current = nextUrl;
         setDraftUrl(nextUrl);
         onUrlChange(paneId, nextUrl);
         setError(null);
       } catch (cause) {
-        setError(String(cause));
+        if (!disposedRef.current) setError(String(cause));
       }
     },
     [onUrlChange, paneId, syncBounds],
@@ -152,12 +214,15 @@ function BrowserPaneComponent({
   };
 
   const runBrowserAction = (command: string) => {
-    void invoke(command, { paneId }).catch((cause) => setError(String(cause)));
+    if (!createdRef.current) return;
+    void invoke(command, { paneId }).catch((cause) => {
+      if (!disposedRef.current) setError(String(cause));
+    });
   };
 
   const close = () => {
-    void invoke("close_browser_pane", { paneId });
-    createdRef.current = false;
+    disposedRef.current = true;
+    closeNativePane();
     onClose(paneId);
   };
 
