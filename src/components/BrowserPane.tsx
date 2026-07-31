@@ -26,10 +26,15 @@ function normalizeUrl(value: string): string {
   if (!trimmed) return DEFAULT_URL;
 
   try {
-    return new URL(trimmed).toString();
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.toString();
+    }
   } catch {
-    return new URL(`https://${trimmed}`).toString();
+    // Fall through and prepend https:// below.
   }
+
+  return new URL(`https://${trimmed}`).toString();
 }
 
 function BrowserPaneComponent({
@@ -42,6 +47,7 @@ function BrowserPaneComponent({
 }: BrowserPaneProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const urlRef = useRef(url);
+  const activeRef = useRef(active);
   const createdRef = useRef(false);
   const [draftUrl, setDraftUrl] = useState(url);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +56,10 @@ function BrowserPaneComponent({
     urlRef.current = url;
     setDraftUrl(url);
   }, [url]);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   const syncBounds = useCallback(async () => {
     const host = hostRef.current;
@@ -70,6 +80,9 @@ function BrowserPaneComponent({
       if (!createdRef.current) {
         await invoke("create_browser_pane", { ...payload, url: urlRef.current });
         createdRef.current = true;
+        if (!activeRef.current) {
+          await invoke("hide_browser_pane", { paneId });
+        }
       } else {
         await invoke("set_browser_pane_bounds", payload);
       }
@@ -104,6 +117,7 @@ function BrowserPaneComponent({
   }, [paneId, syncBounds]);
 
   useEffect(() => {
+    activeRef.current = active;
     if (!createdRef.current) {
       if (active) void syncBounds();
       return;
@@ -119,6 +133,7 @@ function BrowserPaneComponent({
     async (nextValue: string) => {
       const nextUrl = normalizeUrl(nextValue);
       try {
+        if (!createdRef.current) await syncBounds();
         await invoke("navigate_browser_pane", { paneId, url: nextUrl });
         urlRef.current = nextUrl;
         setDraftUrl(nextUrl);
@@ -128,7 +143,7 @@ function BrowserPaneComponent({
         setError(String(cause));
       }
     },
-    [onUrlChange, paneId],
+    [onUrlChange, paneId, syncBounds],
   );
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
