@@ -11,9 +11,10 @@
 - The pipe name is user-specific and protocol-versioned.
 - Every request must include the random token stored in `%LOCALAPPDATA%\cmux-windows\automation-v1.json`.
 - The first server instance flag prevents a second process from impersonating the cmux endpoint while the real app is running.
-- Requests and responses are bounded to 64 KiB.
+- Requests and responses are bounded to 64 KiB. Oversized responses are replaced with `RESPONSE_TOO_LARGE`.
 - Idle clients are disconnected after 30 seconds.
 - A connection is limited to 128 requests.
+- The Rust/UI bridge is limited to 64 requests awaiting acknowledgement.
 - Protocol methods are allowlisted. There is no generic shell execution method.
 
 The token is defense in depth and accidental-client protection. The current-user DACL is the primary local authorization boundary.
@@ -103,7 +104,7 @@ Returns the app version, protocol version and desktop process ID.
 
 Params: `{}`
 
-Returns the active workspace ID and a serializable snapshot of workspaces and panes. Runtime-only PTY handles, browser handles and attention payloads are not exposed.
+Returns the active workspace ID and a serializable snapshot of workspaces and panes. Runtime-only PTY handles, browser handles and attention payloads are not exposed. If the snapshot cannot fit in one 64 KiB frame, the server returns `RESPONSE_TOO_LARGE` instead of a partial list.
 
 ## Workspace methods
 
@@ -118,7 +119,7 @@ Returns the active workspace ID and a serializable snapshot of workspaces and pa
 ```
 
 - `title`: required, 1–120 printable characters
-- `cwd`: optional, maximum 2,048 characters
+- `cwd`: optional, maximum 2,048 characters and no control characters
 - `activate`: optional, defaults to `true`
 
 A new workspace starts with one terminal pane.
@@ -158,7 +159,7 @@ Creates one terminal pane in the target workspace.
 }
 ```
 
-`url` is optional and defaults to GitHub. Only HTTP and HTTPS URLs are accepted.
+`url` is optional and defaults to GitHub. Only HTTP and HTTPS URLs are accepted. URLs are limited to 4,096 characters, must not contain control characters and must not embed a username or password.
 
 ### `pane.close`
 
@@ -173,12 +174,16 @@ Closes one pane. The final pane in a workspace is protected and returns `LAST_PA
 
 ## Rust/UI bridge
 
-Workspace state remains owned by React. Rust validates and canonicalizes method params, emits a private local Tauri event and waits for a matching UI acknowledgement.
+Workspace state remains owned by React. Rust validates and canonicalizes method params, emits an event only to the local `main` webview and waits for a matching UI acknowledgement.
 
 - UI readiness is registered only after the listener is mounted.
+- Each mounted listener receives a unique readiness session ID.
+- Stale StrictMode or reload cleanup cannot disable a newer listener session.
+- Readiness transitions are serialized so `ready=false` cannot overtake `ready=true` for the same session.
 - Requests fail with `UI_NOT_READY` before mount or during reload.
 - A bridge request times out after five seconds.
-- Unmounting the UI drains pending requests instead of leaving clients blocked.
+- No more than 64 bridge requests may wait for UI acknowledgement; additional requests return `BRIDGE_BUSY`.
+- Replacing or unmounting the UI drains pending requests instead of leaving clients blocked.
 - Late or duplicate UI responses are ignored.
 
 ## CLI mapping
@@ -206,12 +211,14 @@ The CLI does not provide a raw-method escape hatch.
 - `UNAUTHORIZED`
 - `METHOD_NOT_FOUND`
 - `REQUEST_TOO_LARGE`
+- `RESPONSE_TOO_LARGE`
 - `WORKSPACE_NOT_FOUND`
 - `PANE_NOT_FOUND`
 - `LAST_WORKSPACE_PROTECTED`
 - `LAST_PANE_PROTECTED`
 - `UI_NOT_READY`
 - `UI_TIMEOUT`
+- `BRIDGE_BUSY`
 - `UI_ERROR`
 - `INTERNAL_ERROR`
 
