@@ -3,9 +3,9 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::Duration,
+    thread,
+    time::{Duration, Instant},
 };
-use wait_timeout::ChildExt;
 
 const LOCAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const NETWORK_COMMAND_TIMEOUT: Duration = Duration::from_secs(4);
@@ -50,12 +50,16 @@ fn run_bounded(
         .spawn()
         .ok()?;
 
-    let status = match child.wait_timeout(timeout).ok()? {
-        Some(status) => status,
-        None => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait().ok()? {
+            Some(status) => break status,
+            None if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+            None => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
         }
     };
 
