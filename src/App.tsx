@@ -376,6 +376,7 @@ export default function App() {
                   ) : (
                     <TerminalPane
                       key={pane.id}
+                      workspaceId={workspace.id}
                       sessionId={pane.id}
                       title={pane.title}
                       cwd={workspace.cwd}
