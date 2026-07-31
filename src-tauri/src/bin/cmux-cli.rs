@@ -5,7 +5,17 @@ async fn main() {
         Ok(true) => {}
         Ok(false) => std::process::exit(1),
         Err(error) => {
-            eprintln!("{error}");
+            println!(
+                "{}",
+                serde_json::json!({
+                    "version": 1,
+                    "ok": false,
+                    "error": {
+                        "code": "CLIENT_ERROR",
+                        "message": error
+                    }
+                })
+            );
             std::process::exit(2);
         }
     }
@@ -13,6 +23,16 @@ async fn main() {
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!("cmux-cli is supported on Windows only");
+    println!(
+        "{}",
+        serde_json::json!({
+            "version": 1,
+            "ok": false,
+            "error": {
+                "code": "UNSUPPORTED_PLATFORM",
+                "message": "cmux-cli is supported on Windows only"
+            }
+        })
+    );
     std::process::exit(2);
 }
