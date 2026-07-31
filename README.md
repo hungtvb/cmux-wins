@@ -12,6 +12,7 @@ The work is split into reviewable stacked pull requests:
 2. `feat/browser-panes` — native child WebView2 browser panes
 3. `feat/workspace-metadata` — Git, pull request and workspace-owned listening-port metadata
 4. `feat/local-automation` — current-user named-pipe protocol and `cmux-cli`
+5. `feat/automation-workspaces` — acknowledged workspace and pane automation methods
 
 Do not merge a stacked PR before its base PR.
 
@@ -34,12 +35,13 @@ Implemented on later stacked branches:
 
 - Native WebView2 browser panes and navigation controls
 - Git repository, branch, dirty state, PR and workspace-owned port metadata
-- Versioned local named-pipe transport and read-only CLI health commands
+- Versioned local named-pipe transport and machine-readable CLI
+- Allowlisted workspace and pane list/create/select/close methods
+- Bounded Rust-to-React request acknowledgement bridge
 
 Roadmap work still includes:
 
-- Workspace and pane mutation through the local automation API
-- Bounded terminal output/events for local agents
+- Bounded terminal input/output/events for local agents
 - SSH workspace orchestration
 - Session scrollback restoration
 - Settings UI and keyboard shortcut editor
@@ -109,12 +111,12 @@ The Windows CI workflow uploads both installers as the `cmux-windows-installers`
 
 ## Local automation CLI
 
-The first automation slice is available on `feat/local-automation`.
+Transport-only health commands are available on `feat/local-automation`. Workspace and pane methods are available on `feat/automation-workspaces`.
 
 Start the desktop app first:
 
 ```powershell
-git switch feat/local-automation
+git switch feat/automation-workspaces
 npm install
 npm run tauri dev
 ```
@@ -125,11 +127,29 @@ Build the CLI:
 cargo build --manifest-path src-tauri/Cargo.toml --release --bin cmux-cli
 ```
 
-Call the running app:
+Health and identity:
 
 ```powershell
 .\src-tauri\target\release\cmux-cli.exe ping
 .\src-tauri\target\release\cmux-cli.exe info
+```
+
+Workspace lifecycle:
+
+```powershell
+.\src-tauri\target\release\cmux-cli.exe workspace list
+.\src-tauri\target\release\cmux-cli.exe workspace create "Agent work" --cwd C:\code\project
+.\src-tauri\target\release\cmux-cli.exe workspace create "Background" --no-activate
+.\src-tauri\target\release\cmux-cli.exe workspace select <workspace-id>
+.\src-tauri\target\release\cmux-cli.exe workspace close <workspace-id>
+```
+
+Pane lifecycle:
+
+```powershell
+.\src-tauri\target\release\cmux-cli.exe pane terminal <workspace-id>
+.\src-tauri\target\release\cmux-cli.exe pane browser <workspace-id> https://example.com
+.\src-tauri\target\release\cmux-cli.exe pane close <workspace-id> <pane-id>
 ```
 
 The CLI prints machine-readable JSON. Endpoint discovery and its random token are stored in:
@@ -138,7 +158,7 @@ The CLI prints machine-readable JSON. Endpoint discovery and its random token ar
 %LOCALAPPDATA%\cmux-windows\automation-v1.json
 ```
 
-The named pipe is protected with a DACL for the current Windows user, rejects remote clients, enforces protocol version 1, and exposes only allowlisted methods. There is no generic shell-execution endpoint. See [`docs/AUTOMATION-PROTOCOL.md`](docs/AUTOMATION-PROTOCOL.md).
+The named pipe is protected with a DACL for the current Windows user, rejects remote clients, enforces protocol version 1, bounds request/response sizes, and exposes only allowlisted methods. The workspace bridge targets only the local `main` webview and requires an acknowledged response. There is no raw-method or generic shell-execution endpoint. See [`docs/AUTOMATION-PROTOCOL.md`](docs/AUTOMATION-PROTOCOL.md).
 
 ## Agent notification smoke test
 
