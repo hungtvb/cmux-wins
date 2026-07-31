@@ -1,3 +1,5 @@
+mod workspace_metadata;
+
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::{
@@ -11,6 +13,7 @@ use tauri::{
     WebviewUrl,
 };
 use url::Url;
+use workspace_metadata::get_workspace_metadata;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -350,7 +353,8 @@ pub fn run() {
             browser_go_forward,
             show_browser_pane,
             hide_browser_pane,
-            close_browser_pane
+            close_browser_pane,
+            get_workspace_metadata
         ])
         .run(tauri::generate_context!())
         .expect("error while running cmux Windows");
