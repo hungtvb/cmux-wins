@@ -2,6 +2,7 @@
 
 use serde_json::json;
 use std::{io, process, time::Duration};
+use tauri::{AppHandle, Manager};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::windows::named_pipe::{NamedPipeServer, ServerOptions},
@@ -9,7 +10,9 @@ use tokio::{
 };
 
 use super::{
+    bridge::{request as bridge_request, AutomationBridge},
     config::{load_or_create, pipe_name_for_sid},
+    methods::prepare_frontend_method,
     protocol::{
         token_matches, validate_request, AutomationRequest, AutomationResponse,
         MAX_REQUEST_BYTES, PROTOCOL_VERSION,
@@ -20,7 +23,7 @@ use super::{
 const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REQUESTS_PER_CONNECTION: usize = 128;
 
-pub async fn run() -> io::Result<()> {
+pub async fn run(app: AppHandle) -> io::Result<()> {
     let (sid, mut first_descriptor) = SecurityDescriptor::for_current_user()?;
     let pipe_name = pipe_name_for_sid(&sid);
     let first_server = create_server_instance(
@@ -48,8 +51,9 @@ pub async fn run() -> io::Result<()> {
         drop(descriptor);
 
         let token = config.token.clone();
+        let client_app = app.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_client(connected, &token).await {
+            if let Err(error) = handle_client(connected, &token, Some(client_app)).await {
                 eprintln!("[cmux automation] client connection failed: {error}");
             }
         });
@@ -108,7 +112,11 @@ where
     }
 }
 
-async fn handle_client(server: NamedPipeServer, expected_token: &str) -> io::Result<()> {
+async fn handle_client(
+    server: NamedPipeServer,
+    expected_token: &str,
+    app: Option<AppHandle>,
+) -> io::Result<()> {
     let (reader, mut writer) = tokio::io::split(server);
     let mut reader = BufReader::new(reader);
 
@@ -142,14 +150,18 @@ async fn handle_client(server: NamedPipeServer, expected_token: &str) -> io::Res
             line.pop();
         }
 
-        let response = dispatch(&line, expected_token);
+        let response = dispatch(&line, expected_token, app.as_ref()).await;
         write_response(&mut writer, &response).await?;
     }
 
     Ok(())
 }
 
-fn dispatch(line: &[u8], expected_token: &str) -> AutomationResponse {
+async fn dispatch(
+    line: &[u8],
+    expected_token: &str,
+    app: Option<&AppHandle>,
+) -> AutomationResponse {
     let request: AutomationRequest = match serde_json::from_slice(line) {
         Ok(request) => request,
         Err(error) => {
@@ -173,21 +185,44 @@ fn dispatch(line: &[u8], expected_token: &str) -> AutomationResponse {
         );
     }
 
-    match request.method.as_str() {
-        "ping" => AutomationResponse::success(request.id, json!({ "pong": true })),
+    let request_id = request.id;
+    let method = request.method;
+    let params = request.params;
+
+    match method.as_str() {
+        "ping" => AutomationResponse::success(request_id, json!({ "pong": true })),
         "app.info" => AutomationResponse::success(
-            request.id,
+            request_id,
             json!({
                 "appVersion": env!("CARGO_PKG_VERSION"),
                 "protocolVersion": PROTOCOL_VERSION,
                 "processId": process::id(),
             }),
         ),
-        _ => AutomationResponse::failure(
-            request.id,
-            "METHOD_NOT_FOUND",
-            "unsupported automation method",
-        ),
+        _ => match prepare_frontend_method(&method, params) {
+            Err(error) => AutomationResponse::failure(request_id, error.code, error.message),
+            Ok(None) => AutomationResponse::failure(
+                request_id,
+                "METHOD_NOT_FOUND",
+                "unsupported automation method",
+            ),
+            Ok(Some(params)) => {
+                let Some(app) = app else {
+                    return AutomationResponse::failure(
+                        request_id,
+                        "INTERNAL_ERROR",
+                        "workspace bridge is not available",
+                    );
+                };
+                let bridge = app.state::<AutomationBridge>();
+                match bridge_request(app, bridge.inner(), &method, params).await {
+                    Ok(result) => AutomationResponse::success(request_id, result),
+                    Err(error) => {
+                        AutomationResponse::failure(request_id, error.code, error.message)
+                    }
+                }
+            }
+        },
     }
 }
 
@@ -224,13 +259,13 @@ mod tests {
         .expect("request should serialize")
     }
 
-    #[test]
-    fn ping_requires_valid_token() {
-        let denied = dispatch(&request("ping", &"b".repeat(64)), TOKEN);
+    #[tokio::test]
+    async fn ping_requires_valid_token() {
+        let denied = dispatch(&request("ping", &"b".repeat(64)), TOKEN, None).await;
         assert!(!denied.ok);
         assert_eq!(denied.error.expect("missing error").code, "UNAUTHORIZED");
 
-        let allowed = dispatch(&request("ping", TOKEN), TOKEN);
+        let allowed = dispatch(&request("ping", TOKEN), TOKEN, None).await;
         assert!(allowed.ok);
         assert_eq!(
             allowed
@@ -240,9 +275,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn unknown_methods_are_rejected() {
-        let response = dispatch(&request("shell.exec", TOKEN), TOKEN);
+    #[tokio::test]
+    async fn unknown_methods_are_rejected() {
+        let response = dispatch(&request("shell.exec", TOKEN), TOKEN, None).await;
         assert!(!response.ok);
         assert_eq!(
             response.error.expect("missing error").code,
@@ -250,9 +285,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn malformed_json_is_rejected_without_panicking() {
-        let response = dispatch(b"{not-json", TOKEN);
+    #[tokio::test]
+    async fn malformed_json_is_rejected_without_panicking() {
+        let response = dispatch(b"{not-json", TOKEN, None).await;
         assert!(!response.ok);
         assert_eq!(response.error.expect("missing error").code, "INVALID_JSON");
     }
@@ -276,7 +311,7 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             server.connect().await.expect("server should connect");
-            handle_client(server, TOKEN)
+            handle_client(server, TOKEN, None)
                 .await
                 .expect("server should handle client");
         });
