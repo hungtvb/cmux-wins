@@ -1,7 +1,17 @@
-export type Pane = {
+export type TerminalPaneModel = {
   id: string;
+  kind: "terminal";
   title: string;
 };
+
+export type BrowserPaneModel = {
+  id: string;
+  kind: "browser";
+  title: string;
+  url: string;
+};
+
+export type Pane = TerminalPaneModel | BrowserPaneModel;
 
 export type Workspace = {
   id: string;
