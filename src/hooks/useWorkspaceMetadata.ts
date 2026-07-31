@@ -9,18 +9,25 @@ type WorkspaceMetadataEntry = {
   metadata: WorkspaceMetadata;
 };
 
-export function useWorkspaceMetadata(workspaces: Workspace[]) {
+export function useWorkspaceMetadata(workspaces: Workspace[], activeWorkspaceId: string) {
   const [metadataByWorkspace, setMetadataByWorkspace] = useState<
     Record<string, WorkspaceMetadata | undefined>
   >({});
 
   const targetsKey = useMemo(
-    () => workspaces.map((workspace) => `${workspace.id}\u0000${workspace.cwd}`).join("\u0001"),
-    [workspaces],
+    () =>
+      `${activeWorkspaceId}\u0002${workspaces
+        .map((workspace) => `${workspace.id}\u0000${workspace.cwd}`)
+        .join("\u0001")}`,
+    [activeWorkspaceId, workspaces],
   );
 
   useEffect(() => {
-    const requests = workspaces.map(({ id, cwd }) => ({ workspaceId: id, cwd }));
+    const requests = workspaces.map(({ id, cwd }) => ({
+      workspaceId: id,
+      cwd,
+      resolvePullRequest: id === activeWorkspaceId,
+    }));
     let disposed = false;
     let refreshing = false;
 
