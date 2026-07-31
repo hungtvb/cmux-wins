@@ -1,12 +1,21 @@
 # cmux Windows
 
-A Windows 11 port of the core [cmux](https://github.com/manaflow-ai/cmux) workflow: vertical workspaces, split terminal panes, and agent-attention notifications.
+A Windows 11 port of the core [cmux](https://github.com/manaflow-ai/cmux) workflow: vertical workspaces, split terminal panes, embedded browser surfaces, development metadata, and agent-attention notifications.
 
-The upstream application is native macOS software built with Swift, AppKit, and GhosttyKit. This project is therefore a platform port, not a direct recompilation. The Windows shell uses Tauri, React, xterm.js, Rust, and the Windows ConPTY API through `portable-pty`.
+The upstream application is native macOS software built with Swift, AppKit, and GhosttyKit. This project is therefore a platform port, not a direct recompilation. The Windows shell uses Tauri, React, xterm.js, Rust, WebView2, and the Windows ConPTY API through `portable-pty`.
 
-## MVP scope
+## Delivery stack
 
-Implemented on `feat/windows-mvp`:
+The work is split into reviewable stacked pull requests:
+
+1. `feat/windows-mvp` — terminal/workspace MVP, QA harness, installers and release pipeline
+2. `feat/browser-panes` — native child WebView2 browser panes
+3. `feat/workspace-metadata` — Git, pull request and workspace-owned listening-port metadata
+4. `feat/local-automation` — current-user named-pipe protocol and `cmux-cli`
+
+Do not merge a stacked PR before its base PR.
+
+## Implemented baseline
 
 - Native Windows desktop shell through Tauri/WebView2
 - Vertical workspace sidebar
@@ -19,12 +28,18 @@ Implemented on `feat/windows-mvp`:
 - OSC 9/99/777 agent-attention detection
 - Per-pane attention ring and unread workspace indicator
 - MSI and NSIS bundle configuration
-- Windows CI for frontend, Rust, and installer artifacts
+- Windows CI for frontend, Rust, ConPTY and installer artifacts
 
-Not implemented yet:
+Implemented on later stacked branches:
 
-- Embedded browser panes and browser automation
-- Git branch, pull request, and listening-port metadata
+- Native WebView2 browser panes and navigation controls
+- Git repository, branch, dirty state, PR and workspace-owned port metadata
+- Versioned local named-pipe transport and read-only CLI health commands
+
+Roadmap work still includes:
+
+- Workspace and pane mutation through the local automation API
+- Bounded terminal output/events for local agents
 - SSH workspace orchestration
 - Session scrollback restoration
 - Settings UI and keyboard shortcut editor
@@ -77,7 +92,8 @@ npm run tauri dev
 | `Ctrl+N` | Create workspace |
 | `Ctrl+1` … `Ctrl+9` | Switch workspace |
 | `Ctrl+B` | Toggle sidebar |
-| `Ctrl+Shift+D` | Split current workspace |
+| `Ctrl+Shift+B` | Add browser pane on the browser branch |
+| `Ctrl+Shift+D` | Split terminal |
 | `Ctrl+Shift+W` | Close current workspace |
 
 ## Build installers
@@ -89,7 +105,40 @@ npm run tauri build
 
 Generated MSI and NSIS installers are written under `src-tauri\target\release\bundle`.
 
-The Windows CI workflow also uploads both installers as the `cmux-windows-installers` artifact after the compile checks pass.
+The Windows CI workflow uploads both installers as the `cmux-windows-installers` artifact after the compile checks pass.
+
+## Local automation CLI
+
+The first automation slice is available on `feat/local-automation`.
+
+Start the desktop app first:
+
+```powershell
+git switch feat/local-automation
+npm install
+npm run tauri dev
+```
+
+Build the CLI:
+
+```powershell
+cargo build --manifest-path src-tauri/Cargo.toml --release --bin cmux-cli
+```
+
+Call the running app:
+
+```powershell
+.\src-tauri\target\release\cmux-cli.exe ping
+.\src-tauri\target\release\cmux-cli.exe info
+```
+
+The CLI prints machine-readable JSON. Endpoint discovery and its random token are stored in:
+
+```text
+%LOCALAPPDATA%\cmux-windows\automation-v1.json
+```
+
+The named pipe is protected with a DACL for the current Windows user, rejects remote clients, enforces protocol version 1, and exposes only allowlisted methods. There is no generic shell-execution endpoint. See [`docs/AUTOMATION-PROTOCOL.md`](docs/AUTOMATION-PROTOCOL.md).
 
 ## Agent notification smoke test
 
