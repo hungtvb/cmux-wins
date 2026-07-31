@@ -6,11 +6,11 @@ import {
   PanelLeftClose,
   Trash2,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserPane } from "./components/BrowserPane";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
+import { useWorkspaceMetadata } from "./hooks/useWorkspaceMetadata";
 import type { Pane, Workspace } from "./types";
 
 const STORAGE_KEY = "cmux-wins.workspaces.v2";
@@ -79,11 +79,13 @@ export default function App() {
   const [attention, setAttention] = useState<Record<string, string>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+  const metadataByWorkspace = useWorkspaceMetadata(workspaces);
 
   const activeWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0],
     [activeWorkspaceId, workspaces],
   );
+  const activeMetadata = activeWorkspace ? metadataByWorkspace[activeWorkspace.id] : undefined;
 
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
@@ -146,17 +148,11 @@ export default function App() {
       return next;
     });
 
+    // TerminalPane and BrowserPane own their native lifecycle cleanup on unmount.
     setWorkspaces((current) =>
       current.map((workspace) => {
-        const pane = workspace.panes.find((candidate) => candidate.id === paneId);
-        if (!pane) return workspace;
-
-        void invoke(pane.kind === "browser" ? "close_browser_pane" : "close_terminal", {
-          paneId: pane.kind === "browser" ? pane.id : undefined,
-          sessionId: pane.kind === "terminal" ? pane.id : undefined,
-        });
-
-        const remaining = workspace.panes.filter((candidate) => candidate.id !== paneId);
+        if (!workspace.panes.some((pane) => pane.id === paneId)) return workspace;
+        const remaining = workspace.panes.filter((pane) => pane.id !== paneId);
         return { ...workspace, panes: remaining.length ? remaining : [createTerminalPane()] };
       }),
     );
@@ -166,14 +162,6 @@ export default function App() {
     setWorkspaces((current) => {
       const target = current.find((workspace) => workspace.id === workspaceId);
       if (!target) return current;
-
-      for (const pane of target.panes) {
-        if (pane.kind === "browser") {
-          void invoke("close_browser_pane", { paneId: pane.id });
-        } else {
-          void invoke("close_terminal", { sessionId: pane.id });
-        }
-      }
 
       setAttention((currentAttention) => {
         const next = { ...currentAttention };
@@ -287,11 +275,16 @@ export default function App() {
 
   if (!activeWorkspace) return null;
 
+  const activeSubtitle = activeMetadata?.available
+    ? `${activeMetadata.repository || "Git repository"} · ${activeMetadata.branch || "unknown branch"}${activeMetadata.dirty ? " · modified" : ""}`
+    : activeWorkspace.cwd || "PowerShell · Windows 11";
+
   return (
     <main className={`app-shell${sidebarOpen ? "" : " app-shell--sidebar-closed"}`}>
       {sidebarOpen && (
         <WorkspaceSidebar
           workspaces={workspaces}
+          metadataByWorkspace={metadataByWorkspace}
           activeWorkspaceId={activeWorkspace.id}
           onSelect={selectWorkspace}
           onAdd={addWorkspace}
@@ -313,7 +306,7 @@ export default function App() {
             </button>
             <div>
               <h1>{activeWorkspace.title}</h1>
-              <span>{activeWorkspace.cwd || "PowerShell · Windows 11"}</span>
+              <span>{activeSubtitle}</span>
             </div>
           </div>
 
