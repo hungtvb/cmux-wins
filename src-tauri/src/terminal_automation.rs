@@ -82,6 +82,15 @@ impl TerminalAutomationStore {
             .state
             .lock()
             .map_err(|_| "terminal automation store is poisoned".to_owned())?;
+        prune_records(&mut state);
+        if !state.records.contains_key(session_id)
+            && state.records.len() >= MAX_TERMINAL_RECORDS
+        {
+            return Err(format!(
+                "terminal automation record limit reached: {MAX_TERMINAL_RECORDS}"
+            ));
+        }
+
         state.next_generation = state.next_generation.wrapping_add(1).max(1);
         let generation = state.next_generation;
         state.records.insert(
@@ -98,7 +107,6 @@ impl TerminalAutomationStore {
             },
         );
         state.order.push_back((session_id.to_owned(), generation));
-        prune_records(&mut state);
         drop(state);
         self.changed.notify_waiters();
         Ok(generation)
@@ -275,12 +283,12 @@ fn split_utf8_chunks(value: &str, max_bytes: usize) -> Vec<&str> {
 }
 
 fn prune_records(state: &mut StoreState) {
-    if state.records.len() <= MAX_TERMINAL_RECORDS {
+    if state.records.len() < MAX_TERMINAL_RECORDS {
         return;
     }
 
     let mut attempts = state.order.len();
-    while state.records.len() > MAX_TERMINAL_RECORDS && attempts > 0 {
+    while state.records.len() >= MAX_TERMINAL_RECORDS && attempts > 0 {
         attempts -= 1;
         let Some((session_id, generation)) = state.order.pop_front() else {
             break;
@@ -340,6 +348,44 @@ mod tests {
             .expect("minimum read should work");
         assert!(!snapshot.chunks.is_empty());
         assert!(snapshot.chunks.iter().all(|chunk| chunk.data.len() <= MIN_READ_BYTES));
+    }
+
+    #[test]
+    fn refuses_unbounded_running_record_growth() {
+        let store = TerminalAutomationStore::default();
+        for index in 0..MAX_TERMINAL_RECORDS {
+            store
+                .begin_session(&format!("pane-{index}"), "workspace-1")
+                .expect("record should fit");
+        }
+        let error = store
+            .begin_session("pane-overflow", "workspace-1")
+            .expect_err("record cap should be enforced");
+        assert!(error.contains("record limit reached"));
+    }
+
+    #[test]
+    fn completed_record_is_pruned_to_make_room() {
+        let store = TerminalAutomationStore::default();
+        let first_generation = store
+            .begin_session("pane-0", "workspace-1")
+            .expect("first record should fit");
+        for index in 1..MAX_TERMINAL_RECORDS {
+            store
+                .begin_session(&format!("pane-{index}"), "workspace-1")
+                .expect("record should fit");
+        }
+        store.finish_session(
+            "pane-0",
+            first_generation,
+            TerminalLifecycleStatus::Exited,
+            Some(0),
+            None,
+        );
+        store
+            .begin_session("pane-replacement", "workspace-1")
+            .expect("completed record should be pruned");
+        assert!(store.snapshot("pane-0", 0, MAX_READ_BYTES).is_err());
     }
 
     #[test]
