@@ -4,7 +4,7 @@ use serde_json::Value;
 
 const MAX_IDENTIFIER_CHARS: usize = 128;
 const MAX_TERMINAL_INPUT_BYTES: usize = 16 * 1024;
-const DEFAULT_READ_BYTES: usize = 32 * 1024;
+const DEFAULT_READ_BYTES: usize = MAX_READ_BYTES;
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum PreparedTerminalMethod {
@@ -186,7 +186,7 @@ mod tests {
         .is_err());
         assert!(prepare_terminal_method(
             "terminal.read",
-            json!({ "sessionId": "pane-1", "maxBytes": 1024 })
+            json!({ "sessionId": "pane-1", "maxBytes": 512 })
         )
         .is_err());
         assert!(prepare_terminal_method(
