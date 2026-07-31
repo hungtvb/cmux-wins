@@ -14,10 +14,11 @@ use tokio::{sync::oneshot, time::timeout};
 const BRIDGE_TIMEOUT: Duration = Duration::from_secs(5);
 const AUTOMATION_REQUEST_EVENT: &str = "automation-request";
 const MAX_PENDING_REQUESTS: usize = 64;
+const MAX_SESSION_ID_CHARS: usize = 128;
 
 #[derive(Default)]
 struct BridgeState {
-    frontend_ready: bool,
+    frontend_session: Option<String>,
     pending: HashMap<u64, oneshot::Sender<FrontendAutomationResolution>>,
 }
 
@@ -77,7 +78,7 @@ pub async fn request(
             .state
             .lock()
             .map_err(|_| BridgeError::internal("automation bridge lock is poisoned"))?;
-        if !state.frontend_ready {
+        if state.frontend_session.is_none() {
             return Err(BridgeError {
                 code: "UI_NOT_READY",
                 message: "workspace UI is not ready for automation requests".to_owned(),
@@ -99,9 +100,12 @@ pub async fn request(
         method: method.to_owned(),
         params,
     };
-    let main_webview = app
-        .get_webview("main")
-        .ok_or_else(|| BridgeError::internal("main workspace webview is not available"))?;
+    let Some(main_webview) = app.get_webview("main") else {
+        remove_pending(bridge, command_id);
+        return Err(BridgeError::internal(
+            "main workspace webview is not available",
+        ));
+    };
 
     if let Err(error) = main_webview.emit(AUTOMATION_REQUEST_EVENT, payload) {
         remove_pending(bridge, command_id);
@@ -144,31 +148,38 @@ pub async fn request(
 #[tauri::command]
 pub fn set_automation_frontend_ready(
     bridge: State<'_, AutomationBridge>,
+    session_id: String,
     ready: bool,
 ) -> Result<(), String> {
+    validate_session_id(&session_id)?;
+
     let pending = {
         let mut state = bridge
             .state
             .lock()
             .map_err(|_| "automation bridge lock is poisoned".to_owned())?;
-        state.frontend_ready = ready;
+
         if ready {
-            HashMap::new()
-        } else {
+            let replacing_session = state
+                .frontend_session
+                .as_deref()
+                .is_some_and(|current| current != session_id);
+            state.frontend_session = Some(session_id);
+            if replacing_session {
+                std::mem::take(&mut state.pending)
+            } else {
+                HashMap::new()
+            }
+        } else if state.frontend_session.as_deref() == Some(session_id.as_str()) {
+            state.frontend_session = None;
             std::mem::take(&mut state.pending)
+        } else {
+            // A stale StrictMode/reload cleanup must not disable a newer session.
+            HashMap::new()
         }
     };
 
-    for (command_id, sender) in pending {
-        let _ = sender.send(FrontendAutomationResolution {
-            command_id,
-            ok: false,
-            result: None,
-            error_code: Some("UI_NOT_READY".to_owned()),
-            error_message: Some("workspace UI was unloaded before completing the command".to_owned()),
-        });
-    }
-
+    fail_pending_not_ready(pending);
     Ok(())
 }
 
@@ -190,6 +201,35 @@ pub fn resolve_automation_request(
     }
 
     Ok(())
+}
+
+fn validate_session_id(session_id: &str) -> Result<(), String> {
+    let count = session_id.chars().count();
+    if count == 0
+        || count > MAX_SESSION_ID_CHARS
+        || !session_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return Err(format!(
+            "automation frontend session ID must contain 1 to {MAX_SESSION_ID_CHARS} safe ASCII characters"
+        ));
+    }
+    Ok(())
+}
+
+fn fail_pending_not_ready(
+    pending: HashMap<u64, oneshot::Sender<FrontendAutomationResolution>>,
+) {
+    for (command_id, sender) in pending {
+        let _ = sender.send(FrontendAutomationResolution {
+            command_id,
+            ok: false,
+            result: None,
+            error_code: Some("UI_NOT_READY".to_owned()),
+            error_message: Some("workspace UI was unloaded before completing the command".to_owned()),
+        });
+    }
 }
 
 fn remove_pending(bridge: &AutomationBridge, command_id: u64) {
@@ -222,40 +262,34 @@ mod tests {
     }
 
     #[test]
-    fn unloading_frontend_drains_pending_requests() {
+    fn stale_frontend_cleanup_does_not_clear_new_session() {
         let bridge = AutomationBridge::default();
-        {
-            let mut state = bridge.state.lock().expect("bridge lock should open");
-            state.frontend_ready = true;
-            let (sender, receiver) = oneshot::channel();
-            state.pending.insert(7, sender);
-            drop(receiver);
-        }
+        let mut state = bridge.state.lock().expect("bridge lock should open");
+        state.frontend_session = Some("new-session".to_owned());
 
-        let pending = {
-            let mut state = bridge.state.lock().expect("bridge lock should open");
-            state.frontend_ready = false;
-            std::mem::take(&mut state.pending)
-        };
-        assert_eq!(pending.len(), 1);
-        assert!(bridge
-            .state
-            .lock()
-            .expect("bridge lock should open")
-            .pending
-            .is_empty());
+        if state.frontend_session.as_deref() == Some("old-session") {
+            state.frontend_session = None;
+        }
+        assert_eq!(state.frontend_session.as_deref(), Some("new-session"));
     }
 
     #[test]
-    fn pending_request_cap_is_enforced_by_state_size() {
+    fn pending_request_cap_matches_protocol_limit() {
         let bridge = AutomationBridge::default();
         let mut state = bridge.state.lock().expect("bridge lock should open");
-        state.frontend_ready = true;
+        state.frontend_session = Some("test-session".to_owned());
         for command_id in 0..MAX_PENDING_REQUESTS as u64 {
             let (sender, receiver) = oneshot::channel();
             state.pending.insert(command_id, sender);
             drop(receiver);
         }
         assert_eq!(state.pending.len(), MAX_PENDING_REQUESTS);
+    }
+
+    #[test]
+    fn session_ids_are_bounded_and_safe() {
+        assert!(validate_session_id("session-123").is_ok());
+        assert!(validate_session_id("").is_err());
+        assert!(validate_session_id("../session").is_err());
     }
 }
