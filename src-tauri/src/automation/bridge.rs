@@ -8,11 +8,12 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::{sync::oneshot, time::timeout};
 
 const BRIDGE_TIMEOUT: Duration = Duration::from_secs(5);
 const AUTOMATION_REQUEST_EVENT: &str = "automation-request";
+const MAX_PENDING_REQUESTS: usize = 64;
 
 #[derive(Default)]
 struct BridgeState {
@@ -82,6 +83,14 @@ pub async fn request(
                 message: "workspace UI is not ready for automation requests".to_owned(),
             });
         }
+        if state.pending.len() >= MAX_PENDING_REQUESTS {
+            return Err(BridgeError {
+                code: "BRIDGE_BUSY",
+                message: format!(
+                    "workspace UI already has {MAX_PENDING_REQUESTS} pending automation requests"
+                ),
+            });
+        }
         state.pending.insert(command_id, sender);
     }
 
@@ -90,8 +99,11 @@ pub async fn request(
         method: method.to_owned(),
         params,
     };
+    let main_webview = app
+        .get_webview("main")
+        .ok_or_else(|| BridgeError::internal("main workspace webview is not available"))?;
 
-    if let Err(error) = app.emit(AUTOMATION_REQUEST_EVENT, payload) {
+    if let Err(error) = main_webview.emit(AUTOMATION_REQUEST_EVENT, payload) {
         remove_pending(bridge, command_id);
         return Err(BridgeError::internal(format!(
             "unable to dispatch automation request to the workspace UI: {error}"
@@ -232,5 +244,18 @@ mod tests {
             .expect("bridge lock should open")
             .pending
             .is_empty());
+    }
+
+    #[test]
+    fn pending_request_cap_is_enforced_by_state_size() {
+        let bridge = AutomationBridge::default();
+        let mut state = bridge.state.lock().expect("bridge lock should open");
+        state.frontend_ready = true;
+        for command_id in 0..MAX_PENDING_REQUESTS as u64 {
+            let (sender, receiver) = oneshot::channel();
+            state.pending.insert(command_id, sender);
+            drop(receiver);
+        }
+        assert_eq!(state.pending.len(), MAX_PENDING_REQUESTS);
     }
 }
