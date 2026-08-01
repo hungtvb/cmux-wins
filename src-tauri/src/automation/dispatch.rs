@@ -7,8 +7,8 @@ use tauri::{AppHandle, Manager};
 
 use super::{
     bridge::{request as bridge_request, AutomationBridge},
-    event_methods::prepare_event_method,
-    events::AutomationEventStore,
+    event_methods::{prepare_event_method, PreparedEventRead},
+    events::{AutomationEventReadResult, AutomationEventStore},
     methods::prepare_frontend_method,
     protocol::{
         token_matches, validate_request, AutomationRequest, AutomationResponse,
@@ -123,7 +123,7 @@ async fn dispatch_terminal_method(
 async fn dispatch_event_read(
     request_id: String,
     app: Option<&AppHandle>,
-    prepared: super::event_methods::PreparedEventRead,
+    prepared: PreparedEventRead,
 ) -> AutomationResponse {
     let Some(app) = app else {
         return AutomationResponse::failure(
@@ -133,13 +133,36 @@ async fn dispatch_event_read(
         );
     };
     let store = app.state::<AutomationEventStore>();
-    match store
-        .read(prepared.after_seq, prepared.max_events, prepared.wait_ms)
-        .await
-    {
+    match read_events(store.inner(), &prepared).await {
         Ok(result) => serialize_success(request_id, result, "automation events"),
         Err(error) => AutomationResponse::failure(request_id, "INTERNAL_ERROR", error),
     }
+}
+
+async fn read_events(
+    store: &AutomationEventStore,
+    prepared: &PreparedEventRead,
+) -> Result<AutomationEventReadResult, String> {
+    let mut current = store.snapshot(prepared.after_seq, prepared.max_events)?;
+
+    // A cursor ahead of this process's journal usually came from a previous
+    // desktop process. Reuse `dropped` as the explicit resynchronization signal
+    // and return immediately instead of holding a pointless long-poll.
+    if prepared.after_seq > current.latest_seq {
+        current.dropped = true;
+    }
+
+    if prepared.wait_ms == 0 || current.dropped || !current.events.is_empty() {
+        return Ok(current);
+    }
+
+    let mut result = store
+        .read(prepared.after_seq, prepared.max_events, prepared.wait_ms)
+        .await?;
+    if prepared.after_seq > result.latest_seq {
+        result.dropped = true;
+    }
+    Ok(result)
 }
 
 async fn dispatch_frontend_method(
@@ -240,6 +263,27 @@ mod tests {
             assert!(!response.ok);
             assert_eq!(response.error.expect("missing error").code, "INTERNAL_ERROR");
         }
+    }
+
+    #[tokio::test]
+    async fn future_event_cursor_returns_immediate_resync_signal() {
+        let store = AutomationEventStore::default();
+        store
+            .publish("test.event", json!({ "ok": true }))
+            .expect("event should publish");
+        let prepared = PreparedEventRead {
+            after_seq: 99,
+            max_events: 10,
+            wait_ms: 30_000,
+        };
+
+        let result = read_events(&store, &prepared)
+            .await
+            .expect("event read should succeed");
+        assert!(result.dropped);
+        assert!(result.events.is_empty());
+        assert_eq!(result.latest_seq, 1);
+        assert_eq!(result.next_seq, 1);
     }
 
     #[tokio::test]
