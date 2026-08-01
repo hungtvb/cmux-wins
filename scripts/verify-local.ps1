@@ -146,7 +146,8 @@ try {
         cargo check --manifest-path $manifestPath --all-targets
     }
     Invoke-Checked "Rust unit tests" {
-        cargo test --manifest-path $manifestPath --lib -- --nocapture --test-threads=1
+        powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run-rust-unit-tests.ps1") `
+            -ManifestPath $manifestPath
     }
     Invoke-Checked "Windows ConPTY integration tests" {
         cargo test --manifest-path $manifestPath --test conpty_smoke -- --nocapture --test-threads=1
