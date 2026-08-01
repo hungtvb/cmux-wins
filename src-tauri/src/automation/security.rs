@@ -2,9 +2,9 @@
 
 use std::{ffi::c_void, io, mem::size_of, ptr::null_mut};
 use windows::{
-    core::{HSTRING, PWSTR},
+    core::{BOOL, HSTRING, PWSTR},
     Win32::{
-        Foundation::{CloseHandle, BOOL, HANDLE, HLOCAL, LocalFree},
+        Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree},
         Security::{
             Authorization::{
                 ConvertSidToStringSidW,
@@ -117,7 +117,12 @@ fn current_user_sid() -> io::Result<String> {
     let mut sid_text = PWSTR::null();
     unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_text) }.map_err(to_io_error)?;
 
-    let result = unsafe { sid_text.to_string() }.map_err(to_io_error);
+    let result = unsafe { sid_text.to_string() }.map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Windows returned a non-UTF-16 user SID: {error}"),
+        )
+    });
     unsafe {
         LocalFree(Some(HLOCAL(sid_text.0.cast())));
     }
