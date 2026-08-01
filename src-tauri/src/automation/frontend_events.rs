@@ -1,13 +1,13 @@
 use super::events::{
     publish_frontend_automation_events, AutomationEventStore, FrontendAutomationEventInput,
 };
-use tauri::{State, WebviewWindow};
+use tauri::{State, Webview};
 
 const MAIN_WEBVIEW_LABEL: &str = "main";
 
 #[tauri::command]
 pub(crate) fn publish_main_frontend_automation_events(
-    webview: WebviewWindow,
+    webview: Webview,
     store: State<'_, AutomationEventStore>,
     events: Vec<FrontendAutomationEventInput>,
 ) -> Result<(), String> {
@@ -31,6 +31,7 @@ mod tests {
     fn only_main_webview_may_publish_events() {
         assert!(authorize_frontend_event_publisher("main").is_ok());
         assert!(authorize_frontend_event_publisher("browser-pane-1").is_err());
+        assert!(authorize_frontend_event_publisher("browser-123").is_err());
         assert!(authorize_frontend_event_publisher("settings").is_err());
     }
 }
