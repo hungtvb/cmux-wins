@@ -423,9 +423,10 @@ mod tests {
 
     #[test]
     fn chunks_preserve_utf8_boundaries() {
-        let chunks = split_utf8_chunks(&"ế".repeat(5000), MAX_STORED_CHUNK_BYTES);
+        let value = "ế".repeat(5000);
+        let chunks = split_utf8_chunks(&value, MAX_STORED_CHUNK_BYTES);
         assert!(chunks.len() > 1);
-        assert_eq!(chunks.concat(), "ế".repeat(5000));
+        assert_eq!(chunks.concat(), value);
         assert!(chunks.iter().all(|chunk| chunk.len() <= MAX_STORED_CHUNK_BYTES));
     }
 
