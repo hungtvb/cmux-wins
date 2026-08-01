@@ -105,10 +105,12 @@ Invoke-LoggedCommand $mt @(
     "-outputresource:$($testExe.FullName);#1"
 )
 
-$extractedManifest = Join-Path $env:RUNNER_TEMP "cmux-unit-test-embedded.manifest"
-if (-not $env:RUNNER_TEMP) {
-    $extractedManifest = Join-Path ([System.IO.Path]::GetTempPath()) "cmux-unit-test-embedded.manifest"
+$tempRoot = if ($env:RUNNER_TEMP) {
+    $env:RUNNER_TEMP
+} else {
+    [System.IO.Path]::GetTempPath()
 }
+$extractedManifest = Join-Path $tempRoot "cmux-unit-test-embedded.manifest"
 Remove-Item -Force $extractedManifest -ErrorAction SilentlyContinue
 Invoke-LoggedCommand $mt @(
     "-nologo",
