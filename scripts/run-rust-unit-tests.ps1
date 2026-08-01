@@ -1,0 +1,130 @@
+[CmdletBinding()]
+param(
+    [string]$ManifestPath = "",
+    [string]$LogPath = ""
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+if ($env:OS -ne "Windows_NT") {
+    throw "scripts\run-rust-unit-tests.ps1 must run on Windows."
+}
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $ManifestPath) {
+    $ManifestPath = Join-Path $repoRoot "src-tauri\Cargo.toml"
+}
+$ManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
+$manifestDirectory = Split-Path -Parent $ManifestPath
+$targetDeps = Join-Path $manifestDirectory "target\debug\deps"
+$appManifest = Join-Path $manifestDirectory "windows\test.manifest"
+
+if (-not (Test-Path $ManifestPath)) {
+    throw "Cargo manifest was not found: $ManifestPath"
+}
+if (-not (Test-Path $appManifest)) {
+    throw "Windows test manifest was not found: $appManifest"
+}
+
+function Write-OutputLine {
+    param([Parameter(Mandatory)][string]$Message)
+
+    Write-Host $Message
+    if ($LogPath) {
+        $Message | Out-File -FilePath $LogPath -Append -Encoding utf8
+    }
+}
+
+function Invoke-LoggedCommand {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments
+    )
+
+    $output = & $FilePath @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    foreach ($line in @($output)) {
+        Write-OutputLine ([string]$line)
+    }
+    if ($exitCode -ne 0) {
+        throw "Command failed with exit code $exitCode: $FilePath $($Arguments -join ' ')"
+    }
+}
+
+function Find-MtExe {
+    $kitsRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+    if (-not (Test-Path $kitsRoot)) {
+        throw "Windows SDK bin directory was not found: $kitsRoot"
+    }
+
+    $mt = Get-ChildItem -Path $kitsRoot -Filter mt.exe -File -Recurse |
+        Where-Object FullName -Match '\\x64\\mt\.exe$' |
+        Sort-Object FullName -Descending |
+        Select-Object -First 1
+    if (-not $mt) {
+        throw "Windows SDK mt.exe was not found under $kitsRoot"
+    }
+    $mt.FullName
+}
+
+if ($LogPath) {
+    $LogPath = [System.IO.Path]::GetFullPath($LogPath)
+    Remove-Item -Force $LogPath -ErrorAction SilentlyContinue
+}
+
+Write-OutputLine "==> Build Rust library unit-test executable"
+$buildStarted = Get-Date
+Invoke-LoggedCommand "cargo" @(
+    "test",
+    "--manifest-path", $ManifestPath,
+    "--lib",
+    "--no-run"
+)
+
+$testExe = Get-ChildItem -Path $targetDeps -Filter "cmux_wins_lib-*.exe" -File |
+    Where-Object LastWriteTime -GE $buildStarted.AddSeconds(-2) |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -First 1
+if (-not $testExe) {
+    $testExe = Get-ChildItem -Path $targetDeps -Filter "cmux_wins_lib-*.exe" -File |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
+}
+if (-not $testExe) {
+    throw "Cargo did not produce a cmux_wins_lib unit-test executable in $targetDeps"
+}
+
+$mt = Find-MtExe
+Write-OutputLine "==> Embed Common Controls v6 manifest"
+Write-OutputLine "Test executable: $($testExe.FullName)"
+Write-OutputLine "mt.exe: $mt"
+Invoke-LoggedCommand $mt @(
+    "-nologo",
+    "-manifest", $appManifest,
+    "-outputresource:$($testExe.FullName);#1"
+)
+
+$extractedManifest = Join-Path $env:RUNNER_TEMP "cmux-unit-test-embedded.manifest"
+if (-not $env:RUNNER_TEMP) {
+    $extractedManifest = Join-Path ([System.IO.Path]::GetTempPath()) "cmux-unit-test-embedded.manifest"
+}
+Remove-Item -Force $extractedManifest -ErrorAction SilentlyContinue
+Invoke-LoggedCommand $mt @(
+    "-nologo",
+    "-inputresource:$($testExe.FullName);#1",
+    "-out:$extractedManifest"
+)
+
+$embedded = Get-Content -Raw $extractedManifest
+if ($embedded -notmatch "Microsoft\.Windows\.Common-Controls" -or $embedded -notmatch 'version="6\.0\.0\.0"') {
+    throw "Embedded test manifest does not request Microsoft.Windows.Common-Controls v6"
+}
+Write-OutputLine "Embedded Common Controls v6 manifest verified."
+
+Write-OutputLine "==> Run Rust library unit tests"
+Invoke-LoggedCommand $testExe.FullName @(
+    "--nocapture",
+    "--test-threads=1"
+)
+Write-OutputLine "Rust library unit tests passed."
