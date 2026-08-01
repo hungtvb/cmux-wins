@@ -6,7 +6,8 @@ mod workspace_metadata;
 
 use automation::{
     bridge::{resolve_automation_request, set_automation_frontend_ready, AutomationBridge},
-    events::{publish_frontend_automation_events, AutomationEventStore},
+    events::AutomationEventStore,
+    frontend_events::publish_main_frontend_automation_events,
 };
 use browser::{
     browser_go_back, browser_go_forward, close_browser_pane, create_browser_pane,
@@ -45,7 +46,7 @@ pub fn run() {
             get_workspace_metadata_batch,
             set_automation_frontend_ready,
             resolve_automation_request,
-            publish_frontend_automation_events
+            publish_main_frontend_automation_events
         ])
         .run(tauri::generate_context!())
         .expect("error while running cmux Windows");
