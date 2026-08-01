@@ -28,8 +28,16 @@ if (-not (Test-Path $appManifest)) {
 }
 
 function Write-OutputLine {
-    param([Parameter(Mandatory)][string]$Message)
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Message
+    )
 
+    if ($null -eq $Message) {
+        $Message = ""
+    }
     Write-Host $Message
     if ($LogPath) {
         $Message | Out-File -FilePath $LogPath -Append -Encoding utf8
@@ -56,7 +64,8 @@ function Invoke-LoggedCommand {
     }
 
     foreach ($line in @($output)) {
-        Write-OutputLine ([string]$line)
+        $text = if ($null -eq $line) { "" } else { [string]$line }
+        Write-OutputLine $text
     }
     if ($exitCode -ne 0) {
         throw "Command failed with exit code ${exitCode}: $FilePath $($Arguments -join ' ')"
