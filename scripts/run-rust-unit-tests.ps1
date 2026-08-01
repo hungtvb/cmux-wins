@@ -48,7 +48,7 @@ function Invoke-LoggedCommand {
         Write-OutputLine ([string]$line)
     }
     if ($exitCode -ne 0) {
-        throw "Command failed with exit code $exitCode: $FilePath $($Arguments -join ' ')"
+        throw "Command failed with exit code ${exitCode}: $FilePath $($Arguments -join ' ')"
     }
 }
 
