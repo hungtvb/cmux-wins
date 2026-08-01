@@ -42,8 +42,19 @@ function Invoke-LoggedCommand {
         [Parameter(Mandatory)][string[]]$Arguments
     )
 
-    $output = & $FilePath @Arguments 2>&1
-    $exitCode = $LASTEXITCODE
+    # Windows PowerShell 5.1 wraps native stderr lines as NativeCommandError
+    # records. Capture them with Continue and use LASTEXITCODE as the source of
+    # truth so normal Cargo progress output cannot abort the harness.
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $FilePath @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
     foreach ($line in @($output)) {
         Write-OutputLine ([string]$line)
     }
