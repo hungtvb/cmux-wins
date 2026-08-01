@@ -8,7 +8,7 @@ mod config;
 mod dispatch;
 mod event_methods;
 pub(crate) mod events;
-mod frontend_events;
+pub(crate) mod frontend_events;
 mod methods;
 mod protocol;
 #[cfg(windows)]
