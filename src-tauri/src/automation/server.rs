@@ -22,14 +22,8 @@ const MAX_CONCURRENT_CLIENTS: usize = 64;
 const MAX_PIPE_INSTANCES: usize = MAX_CONCURRENT_CLIENTS + 1;
 
 pub async fn run(app: AppHandle) -> io::Result<()> {
-    let (sid, mut first_descriptor) = SecurityDescriptor::for_current_user()?;
+    let (sid, first_server) = create_current_user_server_instance(true, None)?;
     let pipe_name = pipe_name_for_sid(&sid);
-    let first_server = create_server_instance(
-        &pipe_name,
-        true,
-        first_descriptor.as_raw_attributes(),
-    )?;
-    drop(first_descriptor);
 
     // Create the first pipe instance before publishing endpoint discovery so a
     // second process cannot win a config-file race and impersonate cmux.
@@ -49,13 +43,7 @@ pub async fn run(app: AppHandle) -> io::Result<()> {
             .await
             .map_err(io::Error::other)?;
 
-        let mut descriptor = SecurityDescriptor::for_sid(&sid)?;
-        server = create_server_instance(
-            &pipe_name,
-            false,
-            descriptor.as_raw_attributes(),
-        )?;
-        drop(descriptor);
+        server = create_sid_server_instance(&pipe_name, false, &sid)?;
 
         let token = config.token.clone();
         let client_app = app.clone();
@@ -66,6 +54,32 @@ pub async fn run(app: AppHandle) -> io::Result<()> {
             }
         });
     }
+}
+
+fn create_current_user_server_instance(
+    first: bool,
+    pipe_name: Option<&str>,
+) -> io::Result<(String, NamedPipeServer)> {
+    let (sid, mut descriptor) = SecurityDescriptor::for_current_user()?;
+    let owned_pipe_name;
+    let pipe_name = match pipe_name {
+        Some(value) => value,
+        None => {
+            owned_pipe_name = pipe_name_for_sid(&sid);
+            &owned_pipe_name
+        }
+    };
+    let server = create_server_instance(pipe_name, first, descriptor.as_raw_attributes())?;
+    Ok((sid, server))
+}
+
+fn create_sid_server_instance(
+    pipe_name: &str,
+    first: bool,
+    sid: &str,
+) -> io::Result<NamedPipeServer> {
+    let mut descriptor = SecurityDescriptor::for_sid(sid)?;
+    create_server_instance(pipe_name, first, descriptor.as_raw_attributes())
 }
 
 fn create_server_instance(
@@ -261,15 +275,8 @@ mod tests {
             .expect("system clock is before Unix epoch")
             .as_nanos();
         let pipe_name = format!(r"\\.\pipe\cmux-automation-test-{}-{nanos}", process::id());
-        let (_, mut first_descriptor) =
-            SecurityDescriptor::for_current_user().expect("descriptor should build");
-        let first_server = create_server_instance(
-            &pipe_name,
-            true,
-            first_descriptor.as_raw_attributes(),
-        )
-        .expect("first server pipe should be created");
-        drop(first_descriptor);
+        let (sid, first_server) = create_current_user_server_instance(true, Some(&pipe_name))
+            .expect("first server pipe should be created");
 
         let server_pipe_name = pipe_name.clone();
         let server_task = tokio::spawn(async move {
@@ -277,15 +284,8 @@ mod tests {
             for _ in 0..2 {
                 server.connect().await.expect("server should connect");
                 let connected = server;
-                let (_, mut descriptor) =
-                    SecurityDescriptor::for_current_user().expect("descriptor should build");
-                server = create_server_instance(
-                    &server_pipe_name,
-                    false,
-                    descriptor.as_raw_attributes(),
-                )
-                .expect("next server should be created");
-                drop(descriptor);
+                server = create_sid_server_instance(&server_pipe_name, false, &sid)
+                    .expect("next server should be created");
                 handle_client(connected, TOKEN, None)
                     .await
                     .expect("server should handle client");
