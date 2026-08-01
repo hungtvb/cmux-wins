@@ -30,7 +30,8 @@ jobs:
             exit 1
           fi
           sudo ln -sf "$llvm_rc" /usr/local/bin/llvm-rc
-          llvm-rc --version
+          command -v llvm-rc
+          test -x /usr/local/bin/llvm-rc
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
