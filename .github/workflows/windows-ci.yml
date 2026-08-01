@@ -19,6 +19,19 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Install LLVM resource compiler
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes llvm
+          llvm_rc="$(find /usr/lib/llvm-* -type f -name llvm-rc 2>/dev/null | sort -V | tail -n 1)"
+          if [[ -z "$llvm_rc" ]]; then
+            echo "llvm-rc was not found after installing LLVM" >&2
+            exit 1
+          fi
+          sudo ln -sf "$llvm_rc" /usr/local/bin/llvm-rc
+          llvm-rc --version
+
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
