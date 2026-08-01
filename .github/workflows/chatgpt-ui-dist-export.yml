@@ -1,0 +1,70 @@
+name: ChatGPT UI Dist Export
+
+on:
+  pull_request:
+    branches:
+      - feat/automation-events
+    paths:
+      - .github/workflows/chatgpt-ui-dist-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-ui-dist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout exact PR base commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies and generate lockfile
+        run: npm install
+
+      - name: Test, type-check, and build UI
+        run: npm run build
+
+      - name: Package UI dist and build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/cmux-ui"
+          archive="$RUNNER_TEMP/cmux-ui-dist.zip"
+          checksum="$RUNNER_TEMP/cmux-ui-dist.zip.sha256"
+
+          mkdir -p "$stage"
+          cp -a dist "$stage/dist"
+          cp package.json package-lock.json "$stage/"
+
+          {
+            echo "repository=${GITHUB_REPOSITORY}"
+            echo "source_sha=${{ github.event.pull_request.base.sha }}"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "built_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$stage/BUILD-METADATA.txt"
+
+          (cd "$RUNNER_TEMP" && zip -qr "$archive" cmux-ui)
+          sha256sum "$archive" > "$checksum"
+          cat "$stage/BUILD-METADATA.txt"
+          cat "$checksum"
+
+      - name: Upload UI dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmux-ui-dist-${{ github.event.pull_request.base.sha }}
+          path: |
+            ${{ runner.temp }}/cmux-ui-dist.zip
+            ${{ runner.temp }}/cmux-ui-dist.zip.sha256
+          if-no-files-found: error
+          retention-days: 1
