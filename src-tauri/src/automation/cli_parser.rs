@@ -6,8 +6,10 @@ use std::time::Duration;
 pub(crate) const DEFAULT_RUN_TIMEOUT_SECONDS: u64 = 60;
 pub(crate) const MAX_RUN_TIMEOUT_SECONDS: u64 = 600;
 pub(crate) const TERMINAL_READ_BYTES: u64 = 8 * 1024;
+const MAX_EVENT_READ_COUNT: u64 = 100;
+const MAX_EVENT_WAIT_MS: u64 = 30_000;
 
-pub(crate) const HELP: &str = "cmux-cli <ping|info|workspace|pane|terminal>\n\n\
+pub(crate) const HELP: &str = "cmux-cli <ping|info|workspace|pane|terminal|event>\n\n\
   cmux-cli workspace list\n\
   cmux-cli workspace create <title> [--cwd <path>] [--no-activate]\n\
   cmux-cli workspace select <workspace-id>\n\
@@ -17,7 +19,8 @@ pub(crate) const HELP: &str = "cmux-cli <ping|info|workspace|pane|terminal>\n\n\
   cmux-cli pane close <workspace-id> <pane-id>\n\
   cmux-cli terminal write <session-id> <data> [--enter]\n\
   cmux-cli terminal read <session-id> [--after <seq>] [--max-bytes <n>] [--wait-ms <n>]\n\
-  cmux-cli terminal run <session-id> <command> [--timeout <seconds>]";
+  cmux-cli terminal run <session-id> <command> [--timeout <seconds>]\n\
+  cmux-cli event read [--after <seq>] [--max-events <n>] [--wait-ms <n>]";
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum CliAction {
@@ -53,6 +56,7 @@ where
         "workspace" => parse_workspace_command(arguments),
         "pane" => parse_pane_command(arguments),
         "terminal" => parse_terminal_command(arguments),
+        "event" => parse_event_command(arguments),
         _ => Err(format!("unsupported command: {command}\n\n{HELP}")),
     }
 }
@@ -245,6 +249,61 @@ where
     }
 }
 
+fn parse_event_command<I>(mut arguments: I) -> Result<CliAction, String>
+where
+    I: Iterator<Item = String>,
+{
+    let command = arguments
+        .next()
+        .ok_or_else(|| format!("event subcommand is required\n\n{HELP}"))?;
+    if command != "read" {
+        return Err(format!("unsupported event command: {command}\n\n{HELP}"));
+    }
+
+    let mut after_seq = 0_u64;
+    let mut max_events = 100_u64;
+    let mut wait_ms = 0_u64;
+
+    while let Some(option) = arguments.next() {
+        match option.as_str() {
+            "--after" => {
+                after_seq = parse_u64(
+                    &required_argument(&mut arguments, "seq")?,
+                    "seq",
+                    0,
+                    u64::MAX,
+                )?;
+            }
+            "--max-events" => {
+                max_events = parse_u64(
+                    &required_argument(&mut arguments, "count")?,
+                    "count",
+                    1,
+                    MAX_EVENT_READ_COUNT,
+                )?;
+            }
+            "--wait-ms" => {
+                wait_ms = parse_u64(
+                    &required_argument(&mut arguments, "milliseconds")?,
+                    "milliseconds",
+                    0,
+                    MAX_EVENT_WAIT_MS,
+                )?;
+            }
+            _ => return Err(format!("unsupported event read option: {option}")),
+        }
+    }
+
+    Ok(CliAction::Call {
+        method: "event.read",
+        params: json!({
+            "afterSeq": after_seq,
+            "maxEvents": max_events,
+            "waitMs": wait_ms,
+        }),
+    })
+}
+
 fn parse_u64(value: &str, name: &str, min: u64, max: u64) -> Result<u64, String> {
     let parsed = value
         .parse::<u64>()
@@ -279,8 +338,12 @@ where
 mod tests {
     use super::*;
 
-    fn args(values: &[&str]) -> impl Iterator<Item = String> + '_ {
-        values.iter().map(|value| (*value).to_owned())
+    fn args(values: &[&str]) -> std::vec::IntoIter<String> {
+        values
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     #[test]
@@ -367,6 +430,31 @@ mod tests {
     }
 
     #[test]
+    fn parses_event_read_command() {
+        assert_eq!(
+            parse_cli_args(args(&[
+                "event",
+                "read",
+                "--after",
+                "42",
+                "--max-events",
+                "25",
+                "--wait-ms",
+                "30000",
+            ]))
+            .expect("event read should parse"),
+            CliAction::Call {
+                method: "event.read",
+                params: json!({
+                    "afterSeq": 42,
+                    "maxEvents": 25,
+                    "waitMs": 30_000,
+                }),
+            }
+        );
+    }
+
+    #[test]
     fn rejects_unknown_options_and_out_of_range_values() {
         assert!(parse_cli_args(args(&["workspace", "create", "Agent", "--unknown"]))
             .is_err());
@@ -385,6 +473,13 @@ mod tests {
             "echo ok",
             "--timeout",
             "0",
+        ]))
+        .is_err());
+        assert!(parse_cli_args(args(&[
+            "event",
+            "read",
+            "--max-events",
+            "101",
         ]))
         .is_err());
     }
