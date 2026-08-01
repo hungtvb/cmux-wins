@@ -8,6 +8,7 @@ import {
 import type { Workspace } from "../types";
 
 const MAX_EVENT_BATCH = 64;
+const PUBLISH_COMMAND = "publish_main_frontend_automation_events";
 
 type UseAutomationEventPublisherOptions = {
   workspaces: Workspace[];
@@ -25,7 +26,7 @@ function batches<T>(values: T[], size: number): T[][] {
 
 async function publish(events: FrontendAutomationEvent[]) {
   for (const batch of batches(events, MAX_EVENT_BATCH)) {
-    await invoke("publish_frontend_automation_events", { events: batch });
+    await invoke(PUBLISH_COMMAND, { events: batch });
   }
 }
 
