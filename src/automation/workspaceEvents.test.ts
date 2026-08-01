@@ -165,6 +165,39 @@ describe("workspace event diff", () => {
     ]);
   });
 
+  it("clears attention when pane removal renders before attention cleanup", () => {
+    const previous = snapshot();
+    previous.attention["pane-1"] = "approval needed";
+    const current = clone(previous);
+    current.workspaces[0].panes = [
+      { id: "pane-2", kind: "terminal", title: "PowerShell" },
+    ];
+    // React state updates may commit pane removal before the separate attention
+    // cleanup update. The removal itself is the observable clear boundary.
+    current.attention["pane-1"] = "approval needed";
+
+    expect(diffWorkspaceEvents(previous, current)).toEqual([
+      {
+        kind: "paneCreated",
+        workspaceId: "workspace-1",
+        paneId: "pane-2",
+        paneKind: "terminal",
+        title: "PowerShell",
+      },
+      {
+        kind: "attentionCleared",
+        workspaceId: "workspace-1",
+        paneId: "pane-1",
+      },
+      {
+        kind: "paneClosed",
+        workspaceId: "workspace-1",
+        paneId: "pane-1",
+        paneKind: "terminal",
+      },
+    ]);
+  });
+
   it("emits attention requests on first message and message changes", () => {
     const previous = snapshot();
     const current = clone(previous);
@@ -189,6 +222,27 @@ describe("workspace event diff", () => {
         message: "input required",
       },
     ]);
+  });
+
+  it("normalizes NUL and bounds event text by Unicode characters", () => {
+    const previous = snapshot();
+    const current = clone(previous);
+    current.workspaces.push({
+      id: "workspace-2",
+      title: `Agent\0${"ế".repeat(1100)}`,
+      cwd: `C:\\code\0${"x".repeat(1100)}`,
+      unread: false,
+      panes: [{ id: "pane-2", kind: "terminal", title: "PowerShell" }],
+    });
+
+    const created = diffWorkspaceEvents(previous, current)[0];
+    if (created.kind !== "workspaceCreated") {
+      throw new Error("expected workspaceCreated event");
+    }
+    expect(created.title).not.toContain("\0");
+    expect(Array.from(created.title)).toHaveLength(1024);
+    expect(created.cwd).not.toContain("\0");
+    expect(Array.from(created.cwd)).toHaveLength(1024);
   });
 
   it("does not emit anything for equivalent observable state", () => {
