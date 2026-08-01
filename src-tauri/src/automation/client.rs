@@ -1,6 +1,6 @@
 #![cfg(windows)]
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{
     io, process,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -173,6 +173,7 @@ pub(crate) fn request_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn request_ids_are_non_empty_and_process_scoped() {
