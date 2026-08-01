@@ -1,5 +1,7 @@
 import type { Pane, Workspace } from "../types";
 
+const MAX_EVENT_TEXT_CHARS = 1024;
+
 export type FrontendAutomationEvent =
   | {
       kind: "workspaceCreated";
@@ -60,6 +62,12 @@ type PaneContext = {
   pane: Pane;
 };
 
+function normalizeEventText(value: string): string {
+  return Array.from(value.replaceAll("\0", ""))
+    .slice(0, MAX_EVENT_TEXT_CHARS)
+    .join("");
+}
+
 function paneContexts(workspaces: Workspace[]): Map<string, PaneContext> {
   const contexts = new Map<string, PaneContext>();
   for (const workspace of workspaces) {
@@ -79,8 +87,10 @@ function paneEventPayload(
     workspaceId: context.workspaceId,
     paneId: context.pane.id,
     paneKind: context.pane.kind,
-    title: context.pane.title,
-    ...(context.pane.kind === "browser" ? { url: context.pane.url } : {}),
+    title: normalizeEventText(context.pane.title),
+    ...(context.pane.kind === "browser"
+      ? { url: normalizeEventText(context.pane.url) }
+      : {}),
   };
 }
 
@@ -112,8 +122,8 @@ export function diffWorkspaceEvents(
       events.push({
         kind: "workspaceCreated",
         workspaceId: workspace.id,
-        title: workspace.title,
-        cwd: workspace.cwd,
+        title: normalizeEventText(workspace.title),
+        cwd: normalizeEventText(workspace.cwd),
       });
     }
   }
@@ -138,12 +148,13 @@ export function diffWorkspaceEvents(
       kind: "attentionRequested",
       workspaceId: context.workspaceId,
       paneId,
-      message,
+      message: normalizeEventText(message),
     });
   }
 
   for (const paneId of Object.keys(previous.attention)) {
-    if (paneId in current.attention) continue;
+    const paneWasRemoved = previousPanes.has(paneId) && !currentPanes.has(paneId);
+    if (paneId in current.attention && !paneWasRemoved) continue;
     const context = previousPanes.get(paneId) ?? currentPanes.get(paneId);
     if (!context) continue;
     events.push({
