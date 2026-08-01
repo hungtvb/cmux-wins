@@ -104,10 +104,9 @@ jobs:
         timeout-minutes: 12
         shell: pwsh
         run: |
-          cmd /c "cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1 > cargo-unit-test.log 2>&1"
-          $exitCode = $LASTEXITCODE
-          Get-Content cargo-unit-test.log
-          exit $exitCode
+          powershell -ExecutionPolicy Bypass -File .\scripts\run-rust-unit-tests.ps1 `
+            -ManifestPath .\src-tauri\Cargo.toml `
+            -LogPath .\cargo-unit-test.log
 
       - name: Upload Rust unit test log
         if: always() && steps.cargo-unit-test.outcome != 'skipped'
