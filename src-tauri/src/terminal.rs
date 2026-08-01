@@ -344,17 +344,20 @@ pub(crate) fn resize_terminal(
         .cloned()
         .ok_or_else(|| format!("terminal session not found: {session_id}"))?;
 
-    session
-        .master
-        .lock()
-        .map_err(|_| "terminal master lock is poisoned".to_owned())?
-        .resize(PtySize {
+    let resize_result = {
+        let mut master = session
+            .master
+            .lock()
+            .map_err(|_| "terminal master lock is poisoned".to_owned())?;
+        master.resize(PtySize {
             rows: rows.max(1),
             cols: cols.max(1),
             pixel_width: 0,
             pixel_height: 0,
         })
-        .map_err(|error| format!("unable to resize terminal: {error}"))
+    };
+
+    resize_result.map_err(|error| format!("unable to resize terminal: {error}"))
 }
 
 #[tauri::command]
