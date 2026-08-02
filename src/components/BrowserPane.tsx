@@ -18,6 +18,8 @@ type BrowserPaneProps = {
   title: string;
   url: string;
   active: boolean;
+  focused: boolean;
+  onFocus: () => void;
   onUrlChange: (paneId: string, url: string) => void;
   onClose: (paneId: string) => void;
 };
@@ -48,6 +50,8 @@ function BrowserPaneComponent({
   title,
   url,
   active,
+  focused,
+  onFocus,
   onUrlChange,
   onClose,
 }: BrowserPaneProps) {
@@ -227,11 +231,16 @@ function BrowserPaneComponent({
   };
 
   return (
-    <section className="browser-pane">
+    <section
+      className={`browser-pane${focused ? " browser-pane--focused" : ""}`}
+      onFocusCapture={onFocus}
+      onPointerDown={onFocus}
+    >
       <header className="browser-pane__header">
         <div className="browser-pane__title" title={title}>
           <Globe2 size={14} />
           <span>{title}</span>
+          {focused && <span className="pane-focus-label">Active</span>}
         </div>
         <button
           className="icon-button"

@@ -1,4 +1,4 @@
-import { BellRing, X } from "lucide-react";
+import { BellRing, SquareTerminal, X } from "lucide-react";
 import { memo, useCallback } from "react";
 import { useTerminalSession } from "../hooks/useTerminalSession";
 
@@ -8,6 +8,8 @@ type TerminalPaneProps = {
   title: string;
   cwd: string;
   attention: boolean;
+  focused: boolean;
+  onFocus: () => void;
   onAttention: (sessionId: string, message: string) => void;
   onTitleChange: (sessionId: string, title: string) => void;
   onClose: (sessionId: string) => void;
@@ -19,6 +21,8 @@ function TerminalPaneComponent({
   title,
   cwd,
   attention,
+  focused,
+  onFocus,
   onAttention,
   onTitleChange,
   onClose,
@@ -40,11 +44,20 @@ function TerminalPaneComponent({
   });
 
   return (
-    <section className={`terminal-pane${attention ? " terminal-pane--attention" : ""}`}>
+    <section
+      className={`terminal-pane${focused ? " terminal-pane--focused" : ""}${attention ? " terminal-pane--attention" : ""}`}
+      onFocusCapture={onFocus}
+      onPointerDown={onFocus}
+    >
       <header className="terminal-pane__header">
         <div className="terminal-pane__title" title={title}>
-          {attention && <BellRing size={14} aria-label="Agent requires attention" />}
+          {attention ? (
+            <BellRing size={14} aria-label="Agent requires attention" />
+          ) : (
+            <SquareTerminal size={13} aria-hidden="true" />
+          )}
           <span>{title}</span>
+          {focused && <span className="pane-focus-label">Active</span>}
         </div>
         <button
           className="icon-button"

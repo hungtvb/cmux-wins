@@ -1,15 +1,9 @@
-import {
-  BellOff,
-  Columns2,
-  FolderPlus,
-  Globe2,
-  PanelLeftClose,
-  Trash2,
-} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserPane } from "./components/BrowserPane";
+import { ResizablePaneGrid } from "./components/ResizablePaneGrid";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
+import { WorkspaceTopbar } from "./components/WorkspaceTopbar";
 import { useAutomationBridge } from "./hooks/useAutomationBridge";
 import { useAutomationEventPublisher } from "./hooks/useAutomationEventPublisher";
 import { useWorkspaceMetadata } from "./hooks/useWorkspaceMetadata";
@@ -80,6 +74,8 @@ export default function App() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(() => workspaces[0].id);
   const [attention, setAttention] = useState<Record<string, string>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activePaneByWorkspace, setActivePaneByWorkspace] = useState<Record<string, string>>({});
+  const [splitRatioByWorkspace, setSplitRatioByWorkspace] = useState<Record<string, number>>({});
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const metadataByWorkspace = useWorkspaceMetadata(workspaces, activeWorkspaceId);
 
@@ -111,6 +107,25 @@ export default function App() {
     localStorage.removeItem(LEGACY_STORAGE_KEY);
   }, [workspaces]);
 
+  useEffect(() => {
+    setActivePaneByWorkspace((current) => {
+      const next: Record<string, string> = {};
+      let changed = Object.keys(current).length !== workspaces.length;
+
+      for (const workspace of workspaces) {
+        const currentPaneId = current[workspace.id];
+        const nextPaneId = workspace.panes.some((pane) => pane.id === currentPaneId)
+          ? currentPaneId
+          : workspace.panes[0]?.id;
+
+        if (nextPaneId) next[workspace.id] = nextPaneId;
+        if (nextPaneId !== currentPaneId) changed = true;
+      }
+
+      return changed ? next : current;
+    });
+  }, [workspaces]);
+
   const selectWorkspace = useCallback((workspaceId: string) => {
     activeWorkspaceIdRef.current = workspaceId;
     setActiveWorkspaceId(workspaceId);
@@ -135,25 +150,29 @@ export default function App() {
   const splitTerminalPane = useCallback(() => {
     if (!activeWorkspace) return;
 
+    const pane = createTerminalPane();
     setWorkspaces((current) =>
       current.map((workspace) =>
         workspace.id === activeWorkspace.id
-          ? { ...workspace, panes: [...workspace.panes, createTerminalPane()] }
+          ? { ...workspace, panes: [...workspace.panes, pane] }
           : workspace,
       ),
     );
+    setActivePaneByWorkspace((current) => ({ ...current, [activeWorkspace.id]: pane.id }));
   }, [activeWorkspace]);
 
   const addBrowserPane = useCallback(() => {
     if (!activeWorkspace) return;
 
+    const pane = createBrowserPane();
     setWorkspaces((current) =>
       current.map((workspace) =>
         workspace.id === activeWorkspace.id
-          ? { ...workspace, panes: [...workspace.panes, createBrowserPane()] }
+          ? { ...workspace, panes: [...workspace.panes, pane] }
           : workspace,
       ),
     );
+    setActivePaneByWorkspace((current) => ({ ...current, [activeWorkspace.id]: pane.id }));
   }, [activeWorkspace]);
 
   const closePane = useCallback((paneId: string) => {
@@ -290,10 +309,6 @@ export default function App() {
 
   if (!activeWorkspace) return null;
 
-  const activeSubtitle = activeMetadata?.available
-    ? `${activeMetadata.repository || "Git repository"} · ${activeMetadata.branch || "unknown branch"}${activeMetadata.dirty ? " · modified" : ""}`
-    : activeWorkspace.cwd || "PowerShell · Windows 11";
-
   return (
     <main className={`app-shell${sidebarOpen ? "" : " app-shell--sidebar-closed"}`}>
       {sidebarOpen && (
@@ -308,103 +323,72 @@ export default function App() {
       )}
 
       <section className="workspace">
-        <header className="topbar">
-          <div className="topbar__leading">
-            <button
-              className="icon-button"
-              type="button"
-              title={sidebarOpen ? "Hide sidebar (Ctrl+B)" : "Show sidebar (Ctrl+B)"}
-              aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
-              onClick={() => setSidebarOpen((open) => !open)}
-            >
-              <PanelLeftClose size={17} className={sidebarOpen ? "" : "flip-x"} />
-            </button>
-            <div>
-              <h1>{activeWorkspace.title}</h1>
-              <span>{activeSubtitle}</span>
-            </div>
-          </div>
-
-          <div className="topbar__actions">
-            <button className="toolbar-button" type="button" onClick={addWorkspace} title="Ctrl+N">
-              <FolderPlus size={16} />
-              New workspace
-            </button>
-            <button
-              className="toolbar-button"
-              type="button"
-              onClick={splitTerminalPane}
-              title="Ctrl+Shift+D"
-            >
-              <Columns2 size={16} />
-              Split terminal
-            </button>
-            <button
-              className="toolbar-button"
-              type="button"
-              onClick={addBrowserPane}
-              title="Ctrl+Shift+B"
-            >
-              <Globe2 size={16} />
-              Browser
-            </button>
-            <button className="toolbar-button" type="button" onClick={clearAttention}>
-              <BellOff size={16} />
-              Mark read
-            </button>
-            <button
-              className="toolbar-button toolbar-button--danger"
-              type="button"
-              onClick={() => closeWorkspace(activeWorkspace.id)}
-              title="Ctrl+Shift+W"
-            >
-              <Trash2 size={16} />
-              Close workspace
-            </button>
-          </div>
-        </header>
+        <WorkspaceTopbar
+          workspace={activeWorkspace}
+          metadata={activeMetadata}
+          sidebarOpen={sidebarOpen}
+          attentionCount={activeWorkspace.panes.filter((pane) => Boolean(attention[pane.id])).length}
+          onToggleSidebar={() => setSidebarOpen((open) => !open)}
+          onAddWorkspace={addWorkspace}
+          onSplitTerminal={splitTerminalPane}
+          onAddBrowser={addBrowserPane}
+          onClearAttention={clearAttention}
+          onCloseWorkspace={() => closeWorkspace(activeWorkspace.id)}
+        />
 
         <div className="workspace-stage">
-          {workspaces.map((workspace) => (
-            <div
-              className={`workspace-surface${workspace.id === activeWorkspace.id ? " workspace-surface--active" : ""}`}
-              key={workspace.id}
-              aria-hidden={workspace.id !== activeWorkspace.id}
-            >
+          {workspaces.map((workspace) => {
+            const activePaneId = activePaneByWorkspace[workspace.id] ?? workspace.panes[0]?.id;
+
+            return (
               <div
-                className="pane-grid"
-                style={{
-                  gridTemplateColumns: `repeat(${Math.min(workspace.panes.length, 2)}, minmax(0, 1fr))`,
-                }}
+                className={`workspace-surface${workspace.id === activeWorkspace.id ? " workspace-surface--active" : ""}`}
+                key={workspace.id}
+                aria-hidden={workspace.id !== activeWorkspace.id}
               >
-                {workspace.panes.map((pane) =>
-                  pane.kind === "browser" ? (
-                    <BrowserPane
-                      key={pane.id}
-                      paneId={pane.id}
-                      title={pane.title}
-                      url={pane.url}
-                      active={workspace.id === activeWorkspace.id}
-                      onUrlChange={handleBrowserUrlChange}
-                      onClose={closePane}
-                    />
-                  ) : (
-                    <TerminalPane
-                      key={pane.id}
-                      workspaceId={workspace.id}
-                      sessionId={pane.id}
-                      title={pane.title}
-                      cwd={workspace.cwd}
-                      attention={Boolean(attention[pane.id])}
-                      onAttention={handleAttention}
-                      onTitleChange={handleTitleChange}
-                      onClose={closePane}
-                    />
-                  ),
-                )}
+                <ResizablePaneGrid
+                  splitRatio={splitRatioByWorkspace[workspace.id] ?? 50}
+                  onSplitRatioChange={(ratio) =>
+                    setSplitRatioByWorkspace((current) => ({ ...current, [workspace.id]: ratio }))
+                  }
+                >
+                  {workspace.panes.map((pane) => {
+                    const focusPane = () =>
+                      setActivePaneByWorkspace((current) => ({ ...current, [workspace.id]: pane.id }));
+                    const focused = pane.id === activePaneId;
+
+                    return pane.kind === "browser" ? (
+                      <BrowserPane
+                        key={pane.id}
+                        paneId={pane.id}
+                        title={pane.title}
+                        url={pane.url}
+                        active={workspace.id === activeWorkspace.id}
+                        focused={focused}
+                        onFocus={focusPane}
+                        onUrlChange={handleBrowserUrlChange}
+                        onClose={closePane}
+                      />
+                    ) : (
+                      <TerminalPane
+                        key={pane.id}
+                        workspaceId={workspace.id}
+                        sessionId={pane.id}
+                        title={pane.title}
+                        cwd={workspace.cwd}
+                        attention={Boolean(attention[pane.id])}
+                        focused={focused}
+                        onFocus={focusPane}
+                        onAttention={handleAttention}
+                        onTitleChange={handleTitleChange}
+                        onClose={closePane}
+                      />
+                    );
+                  })}
+                </ResizablePaneGrid>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
     </main>
