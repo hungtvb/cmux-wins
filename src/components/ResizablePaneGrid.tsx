@@ -77,8 +77,8 @@ export function ResizablePaneGrid({
     onSplitRatioChange(clampSplitRatio(nextRatio));
   };
 
-  const style = isResizable
-    ? ({ "--pane-split": `${ratio}%` } satisfies SplitGridStyle)
+  const style: SplitGridStyle | undefined = isResizable
+    ? { "--pane-split": `${ratio}%` }
     : undefined;
 
   return (
