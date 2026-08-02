@@ -37,3 +37,43 @@
   background: #2b181e;
   color: #ff91a5;
 }
+
+.toolbar-button--command {
+  min-width: 112px;
+  justify-content: flex-start;
+  color: #98a4b6;
+}
+
+.toolbar-button--command > kbd {
+  display: inline-grid;
+  min-width: 34px;
+  height: 19px;
+  margin-left: auto;
+  padding: 0 5px;
+  place-items: center;
+  border: 1px solid #354154;
+  border-radius: 5px;
+  font-size: 8px;
+  line-height: 1;
+  border-color: #354154;
+  background: #171d27;
+  color: #7d899c;
+}
+
+.toolbar-button--command:hover > kbd {
+  border-color: #495873;
+  color: #a9b5c7;
+}
+
+@media (max-width: 1220px) {
+  .toolbar-button--command {
+    min-width: 32px;
+    width: 32px;
+    padding: 0;
+  }
+
+  .toolbar-button--command > span,
+  .toolbar-button--command > kbd {
+    display: none;
+  }
+}
