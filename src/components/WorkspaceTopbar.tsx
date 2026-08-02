@@ -6,6 +6,7 @@ import {
   Globe2,
   MoreHorizontal,
   PanelLeftClose,
+  Search,
   Trash2,
 } from "lucide-react";
 import type { MouseEvent } from "react";
@@ -17,6 +18,7 @@ type WorkspaceTopbarProps = {
   sidebarOpen: boolean;
   attentionCount: number;
   onToggleSidebar: () => void;
+  onOpenCommandPalette: () => void;
   onAddWorkspace: () => void;
   onSplitTerminal: () => void;
   onAddBrowser: () => void;
@@ -34,6 +36,7 @@ export function WorkspaceTopbar({
   sidebarOpen,
   attentionCount,
   onToggleSidebar,
+  onOpenCommandPalette,
   onAddWorkspace,
   onSplitTerminal,
   onAddBrowser,
@@ -124,6 +127,18 @@ export function WorkspaceTopbar({
             {attentionCount > 0 && <span className="toolbar-button__badge">{attentionCount}</span>}
           </button>
         </div>
+
+        <button
+          className="toolbar-button toolbar-button--command"
+          type="button"
+          onClick={onOpenCommandPalette}
+          title="Command palette (Ctrl+K)"
+          aria-label="Open command palette"
+        >
+          <Search size={15} />
+          <span>Commands</span>
+          <kbd>Ctrl K</kbd>
+        </button>
 
         <details className="action-menu">
           <summary className="toolbar-button toolbar-button--compact" title="More workspace actions">

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserPane } from "./components/BrowserPane";
+import { CommandPalette } from "./components/CommandPalette";
+import type { CommandPaletteItem } from "./components/commandPalette";
 import { ResizablePaneGrid } from "./components/ResizablePaneGrid";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
@@ -76,6 +78,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activePaneByWorkspace, setActivePaneByWorkspace] = useState<Record<string, string>>({});
   const [splitRatioByWorkspace, setSplitRatioByWorkspace] = useState<Record<string, number>>({});
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const metadataByWorkspace = useWorkspaceMetadata(workspaces, activeWorkspaceId);
 
@@ -263,9 +266,106 @@ export default function App() {
     );
   }, [activeWorkspace]);
 
+  const commandPaletteItems = useMemo<CommandPaletteItem[]>(() => {
+    const workspaceItems: CommandPaletteItem[] = workspaces.map((workspace, index) => ({
+      id: `workspace.select.${workspace.id}`,
+      label: `Switch to ${workspace.title}`,
+      description: workspace.cwd || "Local workspace",
+      keywords: ["switch", "select", "workspace", workspace.title, workspace.cwd],
+      section: "Workspaces",
+      shortcut: index < 9 ? `Ctrl ${index + 1}` : undefined,
+      run: () => selectWorkspace(workspace.id),
+    }));
+
+    const actions: CommandPaletteItem[] = [
+      {
+        id: "workspace.new",
+        label: "New workspace",
+        description: "Create a local developer workspace",
+        keywords: ["create", "project", "folder"],
+        section: "Actions",
+        shortcut: "Ctrl N",
+        run: addWorkspace,
+      },
+      {
+        id: "pane.split-terminal",
+        label: "Split terminal",
+        description: "Add another PowerShell terminal pane",
+        keywords: ["shell", "powershell", "pane"],
+        section: "Actions",
+        shortcut: "Ctrl ⇧ D",
+        run: splitTerminalPane,
+      },
+      {
+        id: "pane.open-browser",
+        label: "Open browser pane",
+        description: "Create an embedded WebView2 browser",
+        keywords: ["web", "url", "github", "pane"],
+        section: "Actions",
+        shortcut: "Ctrl ⇧ B",
+        run: addBrowserPane,
+      },
+      {
+        id: "layout.toggle-sidebar",
+        label: sidebarOpen ? "Hide sidebar" : "Show sidebar",
+        description: "Toggle the workspace navigator",
+        keywords: ["navigation", "layout", "panel"],
+        section: "View",
+        shortcut: "Ctrl B",
+        run: () => setSidebarOpen((open) => !open),
+      },
+    ];
+
+    if (activeWorkspace && activeWorkspace.panes.some((pane) => Boolean(attention[pane.id]))) {
+      actions.push({
+        id: "workspace.mark-read",
+        label: "Mark workspace alerts as read",
+        description: "Clear agent attention indicators",
+        keywords: ["attention", "notification", "unread"],
+        section: "View",
+        run: clearAttention,
+      });
+    }
+
+    if (activeWorkspace) {
+      actions.push({
+        id: "workspace.close",
+        label: `Close ${activeWorkspace.title}`,
+        description: "Close this workspace and its panes",
+        keywords: ["remove", "delete", "workspace"],
+        section: "Danger zone",
+        shortcut: "Ctrl ⇧ W",
+        danger: true,
+        run: () => closeWorkspace(activeWorkspace.id),
+      });
+    }
+
+    return [...actions, ...workspaceItems];
+  }, [
+    activeWorkspace,
+    addBrowserPane,
+    addWorkspace,
+    attention,
+    clearAttention,
+    closeWorkspace,
+    selectWorkspace,
+    sidebarOpen,
+    splitTerminalPane,
+    workspaces,
+  ]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!event.ctrlKey || event.altKey) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "k" && !event.shiftKey) {
+        event.preventDefault();
+        setCommandPaletteOpen(true);
+        return;
+      }
+
+      if (commandPaletteOpen) return;
 
       if (event.key >= "1" && event.key <= "9") {
         const workspace = workspaces[Number(event.key) - 1];
@@ -276,7 +376,6 @@ export default function App() {
         return;
       }
 
-      const key = event.key.toLowerCase();
       if (key === "b" && !event.shiftKey) {
         event.preventDefault();
         setSidebarOpen((open) => !open);
@@ -302,6 +401,7 @@ export default function App() {
     addBrowserPane,
     addWorkspace,
     closeWorkspace,
+    commandPaletteOpen,
     selectWorkspace,
     splitTerminalPane,
     workspaces,
@@ -329,6 +429,7 @@ export default function App() {
           sidebarOpen={sidebarOpen}
           attentionCount={activeWorkspace.panes.filter((pane) => Boolean(attention[pane.id])).length}
           onToggleSidebar={() => setSidebarOpen((open) => !open)}
+          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
           onAddWorkspace={addWorkspace}
           onSplitTerminal={splitTerminalPane}
           onAddBrowser={addBrowserPane}
@@ -391,6 +492,12 @@ export default function App() {
           })}
         </div>
       </section>
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        items={commandPaletteItems}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
     </main>
   );
 }
