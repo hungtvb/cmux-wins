@@ -3,10 +3,10 @@
 TonyMux stores a versioned, local settings document under:
 
 ```text
-localStorage["tonymux.settings.v2"]
+localStorage["tonymux.settings.v3"]
 ```
 
-The document contains no credentials, automation token or shell executable path. Version 1 settings are migrated automatically and removed after the next successful save.
+Version 2 and version 1 settings are migrated automatically and removed after the next successful save. The settings document contains no credentials, automation token or shell executable path.
 
 ## Shell profiles
 
@@ -33,7 +33,7 @@ Settings are snapshotted when a terminal pane is created:
 - font family and size;
 - line height;
 - cursor style and blinking;
-- scrollback capacity.
+- live xterm scrollback capacity.
 
 Saving settings never restarts an existing PTY. Manual and automation-created terminal panes use the current snapshot when they are created.
 
@@ -41,17 +41,33 @@ The startup command is bounded to 4 KiB, must be a single line and cannot contai
 
 ## Workspace restore
 
-Settings version 2 adds `persistence.restoreWorkspaces`. When enabled, TonyMux restores bounded workspace and pane metadata from a previous launch. Restored terminals always start a new PTY and show a `Restored · new shell` label.
+Settings version 3 contains:
+
+```text
+persistence.restoreWorkspaces
+persistence.terminalHistoryLines
+```
+
+`restoreWorkspaces` controls bounded workspace and pane metadata restoration. Restored terminals always start a new PTY.
+
+`terminalHistoryLines` controls inert terminal-history retention:
+
+- default: 500 lines;
+- minimum: 0, which disables history persistence;
+- maximum: 5,000 lines;
+- hard storage limits: 512 KiB per pane and 4 MiB total history text.
+
+Restored history is displayed in a separate block with a **New shell below** divider. It is never written into xterm or replayed into a shell process.
 
 The Settings dialog can clear saved workspace state without deleting application settings or closing current panes. Disabling restore removes workspace generations and prevents further writes until the option is enabled again.
 
-See [`SESSION-PERSISTENCE.md`](SESSION-PERSISTENCE.md) for the envelope, migration and recovery contract.
+See [`SESSION-PERSISTENCE.md`](SESSION-PERSISTENCE.md) for the envelope, migration, sanitization and recovery contract.
 
 ## Import and export
 
 The Settings dialog can export `tonymux-settings.json` and import the same versioned schema. Values are normalized and bounded during import. Invalid data falls back safely to supported defaults.
 
-Exported settings intentionally exclude automation tokens, named-pipe details, workspace contents, terminal output and repository credentials.
+Exported settings intentionally exclude automation tokens, named-pipe details, workspace contents, terminal output and repository credentials. The export contains only the history-retention preference, never saved history itself.
 
 ## Keyboard access
 
@@ -59,3 +75,4 @@ Exported settings intentionally exclude automation tokens, named-pipe details, w
 - `Escape` closes the dialog.
 - Tab focus is trapped inside the modal while it is open.
 - Form errors use an alert region.
+- The restored-history text block is keyboard-focusable so long content can be scrolled without a pointer.

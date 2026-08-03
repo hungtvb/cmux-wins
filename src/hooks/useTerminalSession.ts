@@ -9,6 +9,7 @@ import {
   snapshotTerminalSettings,
   type TerminalPaneSettings,
 } from "../settings";
+import { sanitizeTerminalHistory } from "../terminalHistory";
 import type { TerminalOutputEvent } from "../types";
 
 type UseTerminalSessionOptions = {
@@ -16,22 +17,62 @@ type UseTerminalSessionOptions = {
   sessionId: string;
   cwd: string;
   paneSettings?: TerminalPaneSettings;
+  restoredHistory?: string;
+  historyLineLimit: number;
+  onHistoryChange: (history: string) => void;
   onAttention: (message: string) => void;
   onTitleChange: (title: string) => void;
 };
 
 const notificationPattern = /\x1b\](?:9|99|777);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+const HISTORY_CAPTURE_INTERVAL_MS = 2_000;
+
+function readTerminalBuffer(terminal: Terminal): string {
+  // The normal buffer owns scrollback. Reading it directly prevents a temporary
+  // alternate-screen application from replacing persisted history with its
+  // viewport-only contents.
+  const buffer = terminal.buffer.normal;
+  const lines: string[] = [];
+
+  for (let index = 0; index < buffer.length; index += 1) {
+    const line = buffer.getLine(index);
+    if (!line) continue;
+
+    const text = line.translateToString(true);
+    if (line.isWrapped && lines.length > 0) {
+      lines[lines.length - 1] += text;
+    } else {
+      lines.push(text);
+    }
+  }
+
+  return lines.join("\n");
+}
 
 export function useTerminalSession({
   workspaceId,
   sessionId,
   cwd,
   paneSettings: providedPaneSettings,
+  restoredHistory,
+  historyLineLimit,
+  onHistoryChange,
   onAttention,
   onTitleChange,
 }: UseTerminalSessionOptions) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const paneSettingsRef = useRef<TerminalPaneSettings | null>(null);
+  const historyLineLimitRef = useRef(historyLineLimit);
+  const onHistoryChangeRef = useRef(onHistoryChange);
+  const restoredHistoryRef = useRef<string | null>(null);
+
+  historyLineLimitRef.current = historyLineLimit;
+  onHistoryChangeRef.current = onHistoryChange;
+
+  if (restoredHistoryRef.current === null) {
+    restoredHistoryRef.current = sanitizeTerminalHistory(restoredHistory, historyLineLimit);
+  }
+
   if (paneSettingsRef.current === null) {
     const currentSettings = loadSettings();
     paneSettingsRef.current = providedPaneSettings
@@ -84,7 +125,25 @@ export function useTerminalSession({
     let started = false;
     let unlisten: UnlistenFn | undefined;
     let notificationBuffer = "";
+    let historyCaptureTimer: number | undefined;
     const pendingInput: string[] = [];
+
+    const captureHistory = () => {
+      historyCaptureTimer = undefined;
+      if (disposed) return;
+
+      const combinedHistory = [restoredHistoryRef.current, readTerminalBuffer(terminal)]
+        .filter(Boolean)
+        .join("\n");
+      onHistoryChangeRef.current(
+        sanitizeTerminalHistory(combinedHistory, historyLineLimitRef.current),
+      );
+    };
+
+    const scheduleHistoryCapture = () => {
+      if (historyCaptureTimer !== undefined) return;
+      historyCaptureTimer = window.setTimeout(captureHistory, HISTORY_CAPTURE_INTERVAL_MS);
+    };
 
     const scanNotifications = (chunk: string) => {
       notificationBuffer += chunk;
@@ -158,6 +217,7 @@ export function useTerminalSession({
     const titleDisposable = terminal.onTitleChange((title) => {
       if (title.trim()) onTitleChange(title.trim());
     });
+    const writeParsedDisposable = terminal.onWriteParsed(scheduleHistoryCapture);
 
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
@@ -173,9 +233,11 @@ export function useTerminalSession({
 
     return () => {
       disposed = true;
+      if (historyCaptureTimer !== undefined) window.clearTimeout(historyCaptureTimer);
       resizeObserver.disconnect();
       inputDisposable.dispose();
       titleDisposable.dispose();
+      writeParsedDisposable.dispose();
       unlisten?.();
       terminal.dispose();
       void invoke("close_terminal", { sessionId }).catch(() => undefined);

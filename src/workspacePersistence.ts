@@ -4,12 +4,20 @@ import {
   snapshotTerminalSettings,
   type AppSettings,
 } from "./settings";
+import {
+  MAX_TERMINAL_HISTORY_BYTES_PER_PANE,
+  MAX_TERMINAL_HISTORY_BYTES_TOTAL,
+  sanitizeTerminalHistory,
+  terminalHistoryByteLength,
+} from "./terminalHistory";
 import type { Pane, Workspace } from "./types";
 
-export const WORKSPACE_STATE_VERSION = 3 as const;
-export const WORKSPACE_STATE_STORAGE_KEY = "tonymux.workspaces.v3";
-export const WORKSPACE_STATE_PREVIOUS_KEY = "tonymux.workspaces.v3.previous";
+export const WORKSPACE_STATE_VERSION = 4 as const;
+export const WORKSPACE_STATE_STORAGE_KEY = "tonymux.workspaces.v4";
+export const WORKSPACE_STATE_PREVIOUS_KEY = "tonymux.workspaces.v4.previous";
 export const LEGACY_WORKSPACE_STORAGE_KEYS = [
+  "tonymux.workspaces.v3",
+  "tonymux.workspaces.v3.previous",
   "cmux-wins.workspaces.v2",
   "cmux-wins.workspaces.v1",
 ] as const;
@@ -27,6 +35,10 @@ const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 export type IdFactory = () => string;
+
+type HistoryBudget = {
+  remainingBytes: number;
+};
 
 export type WorkspaceState = {
   version: typeof WORKSPACE_STATE_VERSION;
@@ -139,6 +151,7 @@ function normalizePane(
   settings: AppSettings,
   workspaceDirectory: string,
   usedPaneIds: Set<string>,
+  historyBudget: HistoryBudget,
   idFactory: IdFactory,
 ): Pane {
   const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -155,6 +168,13 @@ function normalizePane(
   }
 
   const fallbackSnapshot = snapshotTerminalSettings(settings, workspaceDirectory);
+  const historySnapshot = sanitizeTerminalHistory(
+    candidate.historySnapshot,
+    settings.persistence.terminalHistoryLines,
+    Math.min(MAX_TERMINAL_HISTORY_BYTES_PER_PANE, historyBudget.remainingBytes),
+  );
+  historyBudget.remainingBytes -= terminalHistoryByteLength(historySnapshot);
+
   return {
     id,
     kind: "terminal",
@@ -163,6 +183,7 @@ function normalizePane(
       candidate.terminalSettings ?? fallbackSnapshot,
       settings,
     ),
+    ...(historySnapshot ? { historySnapshot } : {}),
     restored: true,
   };
 }
@@ -172,6 +193,7 @@ function normalizeWorkspace(
   settings: AppSettings,
   usedWorkspaceIds: Set<string>,
   usedPaneIds: Set<string>,
+  historyBudget: HistoryBudget,
   idFactory: IdFactory,
 ): Workspace | null {
   if (!value || typeof value !== "object") return null;
@@ -182,7 +204,7 @@ function normalizeWorkspace(
     ? candidate.panes.slice(0, MAX_PANES_PER_WORKSPACE)
     : [];
   const panes = rawPanes.map((pane) =>
-    normalizePane(pane, settings, cwd, usedPaneIds, idFactory),
+    normalizePane(pane, settings, cwd, usedPaneIds, historyBudget, idFactory),
   );
 
   return {
@@ -191,7 +213,7 @@ function normalizeWorkspace(
     cwd,
     panes: panes.length
       ? panes
-      : [normalizePane({}, settings, cwd, usedPaneIds, idFactory)],
+      : [normalizePane({}, settings, cwd, usedPaneIds, historyBudget, idFactory)],
     unread: false,
   };
 }
@@ -218,10 +240,22 @@ function normalizeCandidate(
 
   const usedWorkspaceIds = new Set<string>();
   const usedPaneIds = new Set<string>();
+  const historyBudget: HistoryBudget = {
+    remainingBytes: settings.persistence.terminalHistoryLines > 0
+      ? MAX_TERMINAL_HISTORY_BYTES_TOTAL
+      : 0,
+  };
   const workspaces = rawWorkspaces
     .slice(0, MAX_WORKSPACES)
     .map((workspace) =>
-      normalizeWorkspace(workspace, settings, usedWorkspaceIds, usedPaneIds, idFactory),
+      normalizeWorkspace(
+        workspace,
+        settings,
+        usedWorkspaceIds,
+        usedPaneIds,
+        historyBudget,
+        idFactory,
+      ),
     )
     .filter((workspace): workspace is Workspace => workspace !== null);
   if (!workspaces.length) return null;
@@ -342,8 +376,17 @@ export function saveWorkspaceState(
 
   const normalized = normalizeWorkspaceState(value, settings);
   const currentRaw = storage.getItem(WORKSPACE_STATE_STORAGE_KEY);
-  if (currentRaw && parseStoredState(currentRaw, settings, defaultIdFactory)) {
-    storage.setItem(WORKSPACE_STATE_PREVIOUS_KEY, currentRaw);
+  const current = parseStoredState(currentRaw, settings, defaultIdFactory);
+  if (current) {
+    storage.setItem(WORKSPACE_STATE_PREVIOUS_KEY, JSON.stringify(current));
+  } else {
+    const previous = parseStoredState(
+      storage.getItem(WORKSPACE_STATE_PREVIOUS_KEY),
+      settings,
+      defaultIdFactory,
+    );
+    if (previous) storage.setItem(WORKSPACE_STATE_PREVIOUS_KEY, JSON.stringify(previous));
+    else storage.removeItem(WORKSPACE_STATE_PREVIOUS_KEY);
   }
   storage.setItem(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(normalized));
   for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) storage.removeItem(key);

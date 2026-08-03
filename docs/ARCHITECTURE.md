@@ -41,9 +41,11 @@ Each terminal pane owns a stable UUID. The frontend sends that UUID with spawn, 
 
 ## Workspace persistence model
 
-Workspace persistence is a frontend metadata concern and remains separate from the Rust PTY registry. `tonymux.workspaces.v3` stores bounded workspace, pane, focus, split and launch-profile data; `tonymux.workspaces.v3.previous` is the previous known-good generation used for corruption recovery.
+Workspace persistence is a frontend concern and remains separate from the Rust PTY registry. `tonymux.workspaces.v4` stores bounded workspace, pane, focus, split, launch-profile and optional inert terminal-history data; `tonymux.workspaces.v4.previous` is the normalized previous known-good generation used for corruption recovery.
 
-On launch, restored terminal panes receive their persisted allowlisted profile snapshot but always invoke Rust to create a new PTY and process. Process IDs, PTY handles, terminal output, automation credentials and browser session data are never serialized into the workspace envelope. Legacy `cmux-wins.workspaces.v1/v2` arrays migrate through the same normalization boundary.
+Raw PTY bytes are never serialized. xterm.js first parses live output, then TonyMux reads plain text from the rendered buffer, strips terminal control protocols again, and applies line, per-pane and whole-envelope byte limits. Restored history is rendered in a separate DOM block and never enters `terminal.write`, `write_terminal` or shell startup input.
+
+On launch, restored terminal panes receive their persisted allowlisted profile snapshot but always invoke Rust to create a new PTY and process. Process IDs, PTY handles, automation credentials and browser session data are never serialized into the workspace envelope. Version 3 and legacy `cmux-wins.workspaces.v1/v2` records migrate through the same normalization boundary.
 
 See [`SESSION-PERSISTENCE.md`](SESSION-PERSISTENCE.md).
 
@@ -90,7 +92,7 @@ Detection currently happens in the frontend output stream. A later hardening tas
 ### Phase 4 — production hardening
 
 - Versioned workspace restore and corruption recovery (metadata slice implemented)
-- Bounded terminal scrollback capture and restored-history rendering
+- Bounded inert terminal-history capture and restored-history rendering (implemented)
 - Settings and shortcut editor
 - Auto-update and signing
 - Crash recovery

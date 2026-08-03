@@ -53,14 +53,14 @@ describe("settings schema", () => {
     });
   });
 
-  it("migrates the v1 settings key and persists workspace restore preferences", () => {
+  it("migrates a legacy settings key and persists workspace restore preferences", () => {
     const values = new Map<string, string>([
       [
         LEGACY_SETTINGS_STORAGE_KEYS[0],
         JSON.stringify({
           version: 1,
           defaultShellProfileId: "wsl",
-          persistence: { restoreWorkspaces: false },
+          persistence: { restoreWorkspaces: false, terminalHistoryLines: 750 },
         }),
       ],
     ]);
@@ -73,10 +73,22 @@ describe("settings schema", () => {
     const loaded = loadSettings(storage);
     expect(loaded.defaultShellProfileId).toBe("wsl");
     expect(loaded.persistence.restoreWorkspaces).toBe(false);
+    expect(loaded.persistence.terminalHistoryLines).toBe(750);
 
     saveSettings(loaded, storage);
     expect(values.has(SETTINGS_STORAGE_KEY)).toBe(true);
     expect(values.has(LEGACY_SETTINGS_STORAGE_KEYS[0])).toBe(false);
+  });
+
+  it("clamps restored terminal history retention and supports disabling it", () => {
+    expect(
+      normalizeSettings({ persistence: { terminalHistoryLines: -10 } }).persistence
+        .terminalHistoryLines,
+    ).toBe(0);
+    expect(
+      normalizeSettings({ persistence: { terminalHistoryLines: 99_999 } }).persistence
+        .terminalHistoryLines,
+    ).toBe(5_000);
   });
 
   it("snapshots terminal settings without retaining mutable references", () => {
