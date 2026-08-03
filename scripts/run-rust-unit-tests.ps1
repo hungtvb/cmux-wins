@@ -154,9 +154,34 @@ if ($embedded -notmatch "Microsoft\.Windows\.Common-Controls" -or $embedded -not
 }
 Write-OutputLine "Embedded Common Controls v6 manifest verified."
 
-Write-OutputLine "==> Run Rust library unit tests"
-Invoke-LoggedCommand $testExe.FullName @(
-    "--nocapture",
-    "--test-threads=1"
-)
-Write-OutputLine "Rust library unit tests passed."
+# The terminal trust integration test uses this stable Windows path. Create an
+# inert file for the duration of the test run so the production trust boundary
+# can require that custom executables exist without weakening the test.
+$customShellFixture = "C:\Tools\Shell.exe"
+$customShellFixtureDirectory = Split-Path -Parent $customShellFixture
+$createdFixtureDirectory = -not (Test-Path $customShellFixtureDirectory)
+$createdFixtureFile = -not (Test-Path $customShellFixture)
+
+if ($createdFixtureDirectory) {
+    New-Item -ItemType Directory -Path $customShellFixtureDirectory -Force | Out-Null
+}
+if ($createdFixtureFile) {
+    [System.IO.File]::WriteAllBytes($customShellFixture, [byte[]](0x4D, 0x5A))
+}
+
+try {
+    Write-OutputLine "==> Run Rust library unit tests"
+    Invoke-LoggedCommand $testExe.FullName @(
+        "--nocapture",
+        "--test-threads=1"
+    )
+    Write-OutputLine "Rust library unit tests passed."
+}
+finally {
+    if ($createdFixtureFile) {
+        Remove-Item -Force $customShellFixture -ErrorAction SilentlyContinue
+    }
+    if ($createdFixtureDirectory) {
+        Remove-Item -Force $customShellFixtureDirectory -ErrorAction SilentlyContinue
+    }
+}

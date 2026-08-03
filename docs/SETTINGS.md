@@ -3,10 +3,10 @@
 TonyMux stores a versioned, local settings document under:
 
 ```text
-localStorage["tonymux.settings.v4"]
+localStorage["tonymux.settings.v5"]
 ```
 
-Versions 3, 2 and 1 are migrated automatically and removed after the next successful save. The settings document contains no credentials, automation token or shell executable path.
+Versions 4, 3, 2 and 1 are migrated automatically and removed after the next successful save. The settings document contains no credentials, automation token or executable trust decision. Custom profile paths are configuration data and may be exported, but trust remains in the Rust-owned local store described below.
 
 ## Shell profiles
 
@@ -19,15 +19,24 @@ New terminal panes can use one of four Rust-allowlisted profiles:
 | `command-prompt` | `cmd.exe` |
 | `wsl` | `wsl.exe` |
 
-The legacy `CMUX_SHELL` environment variable remains a compatibility override. It has precedence when set to a non-empty value.
+The legacy `CMUX_SHELL` environment variable remains a compatibility override for the four built-in profiles. It has precedence when set to a non-empty value.
 
-TonyMux does not accept an executable path from the frontend settings document. Custom executable profiles are intentionally deferred until path validation and an explicit trust flow are implemented.
+Settings version 5 also supports at most 12 custom profiles. Each profile has a stable `custom:*` ID, a bounded label and one absolute local Windows `.exe` path. Paths cannot contain command-line arguments, quotes, wildcards, environment-variable expansion, alternate data-stream separators, empty segments, `.`/`..` traversal, UNC locations or control characters.
+
+Changing a custom executable path immediately invalidates its UI trust state. The user must press **Trust executable** before selecting it as the default shell. Rust persists the normalized case-insensitive allowlist separately at:
+
+```text
+%LOCALAPPDATA%\cmux-windows\trusted-shells-v1.json
+```
+
+The trust file is versioned, bounded to 32 executable paths and replaced through a temporary-file write with rollback of the previous generation when publication fails. Rust grants trust only when the normalized path currently resolves to a file. A missing, corrupt, oversized or future-version trust file fails closed. Before every custom process spawn, Rust validates the profile ID and path again and confirms the normalized path exists in the trust store. Editing localStorage alone cannot authorize a new executable.
 
 ## Session behavior
 
 Settings are snapshotted when a terminal pane is created:
 
 - shell profile;
+- snapshotted custom executable path, when applicable;
 - effective working directory;
 - optional startup command;
 - font family and size;
@@ -37,11 +46,11 @@ Settings are snapshotted when a terminal pane is created:
 
 Saving settings never restarts an existing PTY. Manual and automation-created terminal panes use the current snapshot when they are created.
 
-The startup command is bounded to 4 KiB, must be a single line and cannot contain NUL bytes. Rust validates the profile ID and startup command again before spawning the shell.
+The startup command is bounded to 4 KiB, must be a single line and cannot contain NUL bytes. Rust validates the profile ID, optional custom executable, trust decision and startup command again before spawning the shell.
 
 ## Keyboard shortcuts
 
-Settings version 4 stores a conflict-free map of stable action IDs to canonical chords such as `Ctrl+Shift+KeyB`. The recorder uses `KeyboardEvent.code`, so a binding follows the physical key position rather than a locale-sensitive character.
+Settings version 5 retains the version 4 conflict-free map of stable action IDs to canonical chords such as `Ctrl+Shift+KeyB`. The recorder uses `KeyboardEvent.code`, so a binding follows the physical key position rather than a locale-sensitive character.
 
 The editable actions cover:
 
@@ -59,7 +68,7 @@ Global shortcuts are ignored while users type in form fields, selects or content
 
 ## Workspace restore
 
-Settings version 4 contains:
+Settings version 5 contains:
 
 ```text
 persistence.restoreWorkspaces
@@ -85,7 +94,7 @@ See [`SESSION-PERSISTENCE.md`](SESSION-PERSISTENCE.md) for the envelope, migrati
 
 The Settings dialog can export `tonymux-settings.json` and import the same versioned schema. Values are normalized and bounded during import. Invalid data falls back safely to supported defaults.
 
-Exported settings intentionally exclude automation tokens, named-pipe details, workspace contents, terminal output and repository credentials. The export contains only the history-retention preference, never saved history itself.
+Exported settings intentionally exclude automation tokens, named-pipe details, workspace contents, terminal output, repository credentials and executable trust decisions. Custom profile labels and paths are exported so configuration can move between machines, but imported paths remain untrusted unless the destination Windows account had already trusted the same normalized executable. The export contains only the history-retention preference, never saved history itself.
 
 ## Keyboard access
 
@@ -93,5 +102,6 @@ Exported settings intentionally exclude automation tokens, named-pipe details, w
 - `Escape` closes the dialog.
 - Tab focus is trapped inside the modal while it is open.
 - Shortcut recording and conflict messages use status/alert live regions.
+- Custom-profile trust actions report pending, success and failure state through a polite live region.
 - Form errors use an alert region.
 - The restored-history text block is keyboard-focusable so long content can be scrolled without a pointer.

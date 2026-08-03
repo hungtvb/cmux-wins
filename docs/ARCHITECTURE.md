@@ -41,11 +41,11 @@ Each terminal pane owns a stable UUID. The frontend sends that UUID with spawn, 
 
 ## Workspace persistence model
 
-Workspace persistence is a frontend concern and remains separate from the Rust PTY registry. `tonymux.workspaces.v4` stores bounded workspace, pane, focus, split, launch-profile and optional inert terminal-history data; `tonymux.workspaces.v4.previous` is the normalized previous known-good generation used for corruption recovery.
+Workspace persistence is a frontend concern and remains separate from the Rust PTY registry. `tonymux.workspaces.v5` stores bounded workspace, pane, focus, split, launch-profile and optional inert terminal-history data; `tonymux.workspaces.v5.previous` is the normalized previous known-good generation used for corruption recovery.
 
 Raw PTY bytes are never serialized. xterm.js first parses live output, then TonyMux reads plain text from the rendered buffer, strips terminal control protocols again, and applies line, per-pane and whole-envelope byte limits. Restored history is rendered in a separate DOM block and never enters `terminal.write`, `write_terminal` or shell startup input.
 
-On launch, restored terminal panes receive their persisted allowlisted profile snapshot but always invoke Rust to create a new PTY and process. Process IDs, PTY handles, automation credentials and browser session data are never serialized into the workspace envelope. Version 3 and legacy `cmux-wins.workspaces.v1/v2` records migrate through the same normalization boundary.
+On launch, restored terminal panes receive their persisted launch-profile snapshot but always invoke Rust to create a new PTY and process. Built-in IDs remain allowlisted in Rust. A custom snapshot may include one validated absolute `.exe` path, but Rust still requires that normalized path to exist in its separate current-user trust store before spawning. Process IDs, PTY handles, automation credentials, executable trust decisions and browser session data are never serialized into the workspace envelope. Versions 4 and 3 plus legacy `cmux-wins.workspaces.v1/v2` records migrate through the same normalization boundary.
 
 See [`SESSION-PERSISTENCE.md`](SESSION-PERSISTENCE.md).
 
@@ -93,7 +93,7 @@ Detection currently happens in the frontend output stream. A later hardening tas
 
 - Versioned workspace restore and corruption recovery (metadata slice implemented)
 - Bounded inert terminal-history capture and restored-history rendering (implemented)
-- Versioned Settings v4 and conflict-safe shortcut editor (implemented)
+- Versioned Settings v5, trusted custom executables and conflict-safe shortcut editor (implemented)
 - Auto-update and signing
 - Crash recovery
 - PTY integration tests
@@ -103,6 +103,10 @@ Detection currently happens in the frontend output stream. A later hardening tas
 ### Shortcut dispatch boundary
 
 Shortcut configuration is data-only: stable action IDs map to canonical `KeyboardEvent.code` chords. The settings document cannot introduce commands or executable callbacks. Runtime dispatch is an allowlisted action table in React, with duplicate validation, modifier requirements, IME/repeat guards and editable-target suppression. Settings remains reachable through a visible menu even when its chord is unassigned.
+
+### Custom executable trust boundary
+
+Custom profile configuration and executable authorization are deliberately separated. React stores bounded profile IDs, labels and paths in settings and snapshots the selected path into new terminal panes. Rust owns `%LOCALAPPDATA%\cmux-windows\trusted-shells-v1.json`, normalizes paths case-insensitively and verifies trust for every spawn. Imported settings never modify the trust store. A custom profile can launch exactly one absolute local `.exe`; command-line arguments, environment assignments, shell expressions, relative paths and UNC locations are rejected before process creation.
 
 ## Known risks
 

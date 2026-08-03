@@ -114,7 +114,7 @@ describe("workspace persistence", () => {
         workspaces: [{ id: "future", panes: [{ id: "future-pane", kind: "terminal" }] }],
       }),
       [WORKSPACE_STATE_PREVIOUS_KEY]: JSON.stringify({
-        version: 4,
+        version: 5,
         workspaces: [{ id: "safe", title: "Safe", panes: [{ id: "safe-pane", kind: "terminal" }] }],
       }),
     });
@@ -180,7 +180,7 @@ describe("workspace persistence", () => {
 
   it("migrates v3 workspace metadata without requiring terminal history", () => {
     const storage = memoryStorage({
-      [LEGACY_WORKSPACE_STORAGE_KEYS[0]]: JSON.stringify({
+      [LEGACY_WORKSPACE_STORAGE_KEYS[2]]: JSON.stringify({
         version: 3,
         workspaces: [
           { id: "w1", title: "Version 3", panes: [{ id: "p1", kind: "terminal" }] },
@@ -190,8 +190,40 @@ describe("workspace persistence", () => {
 
     const result = loadWorkspaceState(DEFAULT_SETTINGS, storage, idFactory("unused"));
     expect(result.status).toBe("migrated");
-    expect(result.state.version).toBe(4);
+    expect(result.state.version).toBe(5);
     expect(result.state.workspaces[0].panes[0]).not.toHaveProperty("historySnapshot");
+  });
+
+  it("migrates v4 terminal snapshots and preserves valid custom executables", () => {
+    const storage = memoryStorage({
+      [LEGACY_WORKSPACE_STORAGE_KEYS[0]]: JSON.stringify({
+        version: 4,
+        workspaces: [
+          {
+            id: "w1",
+            panes: [
+              {
+                id: "p1",
+                kind: "terminal",
+                terminalSettings: {
+                  shellProfileId: "custom:restored_shell",
+                  customShellExecutable: "c:/Tools/Restored/shell.exe",
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = loadWorkspaceState(DEFAULT_SETTINGS, storage, idFactory("unused"));
+    expect(result.status).toBe("migrated");
+    expect(result.state.workspaces[0].panes[0]).toMatchObject({
+      terminalSettings: {
+        shellProfileId: "custom:restored_shell",
+        customShellExecutable: "C:\\Tools\\Restored\\shell.exe",
+      },
+    });
   });
 
   it("stores only bounded inert terminal history", () => {

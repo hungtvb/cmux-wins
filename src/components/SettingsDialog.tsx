@@ -1,14 +1,18 @@
 import {
+  CheckCircle2,
   Database,
   Download,
   Keyboard,
+  Plus,
   RotateCcw,
   Settings2,
+  ShieldCheck,
   TerminalSquare,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   useEffect,
   useId,
@@ -20,14 +24,18 @@ import {
 } from "react";
 import {
   DEFAULT_SETTINGS,
+  MAX_CUSTOM_SHELL_PROFILES,
   SHELL_PROFILES,
   exportSettings,
+  findCustomShellProfile,
   importSettings,
+  normalizeCustomShellExecutable,
   normalizeSettings,
+  validateCustomShellExecutable,
   validateSettings,
   type AppSettings,
+  type CustomShellProfile,
   type CursorStyle,
-  type ShellProfileId,
 } from "../settings";
 import {
   DEFAULT_SHORTCUT_BINDINGS,
@@ -51,10 +59,29 @@ type SettingsDialogProps = {
 function cloneSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
+    customShellProfiles: settings.customShellProfiles.map((profile) => ({ ...profile })),
     terminal: { ...settings.terminal },
     persistence: { ...settings.persistence },
     shortcuts: { ...settings.shortcuts },
   };
+}
+
+async function queryTrustedExecutables(
+  profiles: CustomShellProfile[],
+): Promise<Record<string, boolean>> {
+  const entries = await Promise.all(
+    profiles.map(async (profile) => {
+      try {
+        const trusted = await invoke<boolean>("is_shell_executable_trusted", {
+          executable: profile.executable,
+        });
+        return [profile.id, trusted] as const;
+      } catch {
+        return [profile.id, false] as const;
+      }
+    }),
+  );
+  return Object.fromEntries(entries);
 }
 
 export function SettingsDialog({
@@ -71,19 +98,37 @@ export function SettingsDialog({
   const shortcutsStatusId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const trustQueryGenerationRef = useRef(0);
   const [draft, setDraft] = useState(() => cloneSettings(settings));
+  const draftRef = useRef(draft);
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [recordingActionId, setRecordingActionId] = useState<ShortcutActionId | null>(null);
   const [shortcutError, setShortcutError] = useState("");
+  const [trustedExecutables, setTrustedExecutables] = useState<Record<string, boolean>>({});
+  const [trustPendingId, setTrustPendingId] = useState<string | null>(null);
+  const [trustStatus, setTrustStatus] = useState("");
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
 
   useEffect(() => {
     if (!open) return;
+    let disposed = false;
     setDraft(cloneSettings(settings));
     setErrors([]);
     setNotice("");
     setRecordingActionId(null);
     setShortcutError("");
+    setTrustPendingId(null);
+    setTrustStatus("");
+    const trustQueryGeneration = ++trustQueryGenerationRef.current;
+    void queryTrustedExecutables(settings.customShellProfiles).then((trusted) => {
+      if (!disposed && trustQueryGeneration === trustQueryGenerationRef.current) {
+        setTrustedExecutables(trusted);
+      }
+    });
     requestAnimationFrame(() => {
       dialogRef.current
         ?.querySelector<HTMLElement>(
@@ -91,6 +136,9 @@ export function SettingsDialog({
         )
         ?.focus();
     });
+    return () => {
+      disposed = true;
+    };
   }, [open, settings]);
 
   if (!open) return null;
@@ -103,6 +151,103 @@ export function SettingsDialog({
       ...current,
       terminal: { ...current.terminal, [key]: value },
     }));
+  };
+
+  const addCustomShellProfile = () => {
+    if (draft.customShellProfiles.length >= MAX_CUSTOM_SHELL_PROFILES) return;
+    trustQueryGenerationRef.current += 1;
+    const profile: CustomShellProfile = {
+      id: `custom:${crypto.randomUUID()}`,
+      label: "Custom shell",
+      executable: "",
+    };
+    setDraft((current) => ({
+      ...current,
+      defaultShellProfileId: profile.id,
+      customShellProfiles: [...current.customShellProfiles, profile],
+    }));
+    setTrustedExecutables((current) => ({ ...current, [profile.id]: false }));
+    setTrustStatus("Add an absolute .exe path, then explicitly trust it before saving.");
+  };
+
+  const updateCustomShellProfile = (
+    profileId: string,
+    key: "label" | "executable",
+    value: string,
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      customShellProfiles: current.customShellProfiles.map((profile) =>
+        profile.id === profileId ? { ...profile, [key]: value } : profile,
+      ),
+    }));
+    if (key === "executable") {
+      trustQueryGenerationRef.current += 1;
+      setTrustedExecutables((current) => ({ ...current, [profileId]: false }));
+      setTrustStatus("Executable path changed. Trust must be granted again.");
+    }
+  };
+
+  const removeCustomShellProfile = (profileId: string) => {
+    trustQueryGenerationRef.current += 1;
+    setDraft((current) => ({
+      ...current,
+      defaultShellProfileId:
+        current.defaultShellProfileId === profileId
+          ? DEFAULT_SETTINGS.defaultShellProfileId
+          : current.defaultShellProfileId,
+      customShellProfiles: current.customShellProfiles.filter(
+        (profile) => profile.id !== profileId,
+      ),
+    }));
+    setTrustedExecutables((current) => {
+      const next = { ...current };
+      delete next[profileId];
+      return next;
+    });
+    setTrustStatus("Custom shell profile removed. Existing terminal processes are unchanged.");
+  };
+
+  const trustCustomShellProfile = async (profile: CustomShellProfile) => {
+    const executableError = validateCustomShellExecutable(profile.executable);
+    if (executableError) {
+      setTrustStatus(`${profile.label || "Custom shell"}: ${executableError}`);
+      return;
+    }
+
+    const executable = normalizeCustomShellExecutable(profile.executable);
+    const trustQueryGeneration = ++trustQueryGenerationRef.current;
+    setTrustPendingId(profile.id);
+    setTrustStatus(`Trusting ${profile.label || "custom shell"}…`);
+    try {
+      const trusted = await invoke<boolean>("trust_shell_executable", { executable });
+      if (!trusted) throw new Error("TonyMux did not persist the trust decision.");
+      const currentProfile = draftRef.current.customShellProfiles.find(
+        (candidate) => candidate.id === profile.id,
+      );
+      if (
+        trustQueryGeneration !== trustQueryGenerationRef.current ||
+        normalizeCustomShellExecutable(currentProfile?.executable) !== executable
+      ) {
+        setTrustStatus(
+          `${profile.label || "Custom shell"} changed while trust was being saved. Review and trust the current path again.`,
+        );
+        return;
+      }
+      setDraft((current) => ({
+        ...current,
+        customShellProfiles: current.customShellProfiles.map((candidate) =>
+          candidate.id === profile.id ? { ...candidate, executable } : candidate,
+        ),
+      }));
+      setTrustedExecutables((current) => ({ ...current, [profile.id]: true }));
+      setTrustStatus(`${profile.label || "Custom shell"} is trusted on this Windows account.`);
+    } catch (cause) {
+      setTrustedExecutables((current) => ({ ...current, [profile.id]: false }));
+      setTrustStatus(`Unable to trust ${profile.label || "custom shell"}: ${String(cause)}`);
+    } finally {
+      setTrustPendingId(null);
+    }
   };
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -137,11 +282,37 @@ export function SettingsDialog({
     }
   };
 
-  const save = () => {
-    const normalized = normalizeSettings(draft);
-    const nextErrors = validateSettings(normalized);
+  const save = async () => {
+    const nextErrors = validateSettings(draft);
     setErrors(nextErrors);
     if (nextErrors.length) return;
+
+    const normalized = normalizeSettings(draft);
+    const selectedCustomProfile = findCustomShellProfile(
+      normalized,
+      normalized.defaultShellProfileId,
+    );
+    if (selectedCustomProfile) {
+      try {
+        const trusted = await invoke<boolean>("is_shell_executable_trusted", {
+          executable: selectedCustomProfile.executable,
+        });
+        setTrustedExecutables((current) => ({
+          ...current,
+          [selectedCustomProfile.id]: trusted,
+        }));
+        if (!trusted) {
+          setErrors([
+            `${selectedCustomProfile.label} must be explicitly trusted before it can be the default shell.`,
+          ]);
+          return;
+        }
+      } catch (cause) {
+        setErrors([`Unable to verify custom shell trust: ${String(cause)}`]);
+        return;
+      }
+    }
+
     onSave(normalized);
     onClose();
   };
@@ -152,6 +323,10 @@ export function SettingsDialog({
     setNotice("");
     setRecordingActionId(null);
     setShortcutError("");
+    trustQueryGenerationRef.current += 1;
+    setTrustedExecutables({});
+    setTrustPendingId(null);
+    setTrustStatus("");
   };
 
   const resetShortcuts = () => {
@@ -246,10 +421,21 @@ export function SettingsDialog({
     if (!file) return;
 
     try {
-      setDraft(importSettings(await file.text()));
+      const imported = importSettings(await file.text());
+      const trustQueryGeneration = ++trustQueryGenerationRef.current;
+      setDraft(imported);
+      const trusted = await queryTrustedExecutables(imported.customShellProfiles);
+      if (trustQueryGeneration === trustQueryGenerationRef.current) {
+        setTrustedExecutables(trusted);
+      }
       setErrors([]);
       setRecordingActionId(null);
       setShortcutError("");
+      setTrustStatus(
+        imported.customShellProfiles.length
+          ? "Imported executable paths remain untrusted unless this Windows account already trusted them."
+          : "",
+      );
     } catch (cause) {
       setErrors([`Unable to import settings: ${String(cause)}`]);
     }
@@ -313,7 +499,7 @@ export function SettingsDialog({
                     onClick={() =>
                       setDraft((current) => ({
                         ...current,
-                        defaultShellProfileId: profile.id as ShellProfileId,
+                        defaultShellProfileId: profile.id,
                       }))
                     }
                   >
@@ -323,6 +509,138 @@ export function SettingsDialog({
                   </button>
                 );
               })}
+            </div>
+
+            <div className="custom-profile-panel">
+              <div className="custom-profile-panel__heading">
+                <div>
+                  <strong>Custom executables</strong>
+                  <small>
+                    TonyMux launches only absolute local .exe paths explicitly trusted on this Windows account.
+                  </small>
+                </div>
+                <button
+                  className="settings-button settings-button--quiet settings-button--compact"
+                  type="button"
+                  disabled={draft.customShellProfiles.length >= MAX_CUSTOM_SHELL_PROFILES}
+                  onClick={addCustomShellProfile}
+                >
+                  <Plus size={13} aria-hidden="true" />
+                  Add profile
+                </button>
+              </div>
+
+              {draft.customShellProfiles.length === 0 ? (
+                <div className="custom-profile-empty">
+                  <ShieldCheck size={16} aria-hidden="true" />
+                  <span>No custom executable has been configured.</span>
+                </div>
+              ) : (
+                <div className="custom-profile-list">
+                  {draft.customShellProfiles.map((profile) => {
+                    const selected = draft.defaultShellProfileId === profile.id;
+                    const executableError = validateCustomShellExecutable(profile.executable);
+                    const trusted = trustedExecutables[profile.id] === true;
+                    const pending = trustPendingId === profile.id;
+                    const fieldId = profile.id.replace(/[^A-Za-z0-9_-]/g, "-");
+                    return (
+                      <fieldset
+                        className={`custom-profile${selected ? " custom-profile--selected" : ""}`}
+                        key={profile.id}
+                      >
+                        <legend className="sr-only">{profile.label || "Custom shell"}</legend>
+                        <div className="custom-profile__toolbar">
+                          <label className="custom-profile__selector">
+                            <input
+                              type="radio"
+                              name="default-shell-profile"
+                              checked={selected}
+                              onChange={() =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  defaultShellProfileId: profile.id,
+                                }))
+                              }
+                            />
+                            <span>Use as default shell</span>
+                          </label>
+                          <button
+                            className="settings-button settings-button--danger settings-button--compact"
+                            type="button"
+                            aria-label={`Remove ${profile.label || "custom shell"}`}
+                            onClick={() => removeCustomShellProfile(profile.id)}
+                          >
+                            <Trash2 size={13} aria-hidden="true" />
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="settings-form-grid">
+                          <label className="settings-field" htmlFor={`${fieldId}-label`}>
+                            <span>Profile name</span>
+                            <input
+                              id={`${fieldId}-label`}
+                              value={profile.label}
+                              maxLength={64}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateCustomShellProfile(profile.id, "label", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="settings-field" htmlFor={`${fieldId}-executable`}>
+                            <span>Executable path</span>
+                            <input
+                              id={`${fieldId}-executable`}
+                              value={profile.executable}
+                              placeholder="C:\\Tools\\shell.exe"
+                              spellCheck={false}
+                              aria-invalid={Boolean(executableError)}
+                              aria-describedby={`${fieldId}-executable-help`}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateCustomShellProfile(
+                                  profile.id,
+                                  "executable",
+                                  event.target.value,
+                                )
+                              }
+                            />
+                            <small
+                              id={`${fieldId}-executable-help`}
+                              className={executableError ? "settings-field__error" : undefined}
+                            >
+                              {executableError ?? "Arguments and environment-variable expansion are not allowed."}
+                            </small>
+                          </label>
+                        </div>
+
+                        <div className="custom-profile__trust">
+                          <span className={trusted ? "custom-profile__trusted" : "custom-profile__untrusted"}>
+                            {trusted ? (
+                              <CheckCircle2 size={14} aria-hidden="true" />
+                            ) : (
+                              <ShieldCheck size={14} aria-hidden="true" />
+                            )}
+                            {trusted ? "Trusted locally" : "Not trusted"}
+                          </span>
+                          <button
+                            className="settings-button settings-button--quiet settings-button--compact"
+                            type="button"
+                            disabled={Boolean(executableError) || trustPendingId !== null}
+                            onClick={() => void trustCustomShellProfile(profile)}
+                          >
+                            <ShieldCheck size={13} aria-hidden="true" />
+                            {pending ? "Trusting…" : trusted ? "Trust again" : "Trust executable"}
+                          </button>
+                        </div>
+                      </fieldset>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="custom-profile-status" role="status" aria-live="polite">
+                {trustStatus}
+              </div>
             </div>
 
             <div className="settings-form-grid">
@@ -478,7 +796,7 @@ export function SettingsDialog({
                           setRecordingActionId(recording ? null : action.id);
                           setShortcutError("");
                         }}
-                        onKeyDown={(event) => {
+                        onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
                           if (recording) recordShortcut(action.id, event);
                         }}
                         onBlur={() => {
