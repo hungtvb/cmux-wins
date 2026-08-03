@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_SHORTCUT_BINDINGS } from "./shortcuts";
 import {
   DEFAULT_SETTINGS,
   LEGACY_SETTINGS_STORAGE_KEYS,
@@ -91,10 +92,70 @@ describe("settings schema", () => {
     ).toBe(5_000);
   });
 
+
+  it("migrates settings v3 to versioned shortcut defaults", () => {
+    const migrated = normalizeSettings({
+      version: 3,
+      defaultShellProfileId: "powershell-7",
+      persistence: { restoreWorkspaces: true, terminalHistoryLines: 800 },
+    });
+    expect(migrated.version).toBe(SETTINGS_VERSION);
+    expect(migrated.shortcuts).toEqual(DEFAULT_SHORTCUT_BINDINGS);
+  });
+
+  it("preserves valid custom and explicitly unbound shortcuts", () => {
+    const normalized = normalizeSettings({
+      shortcuts: {
+        "settings.open": "Alt+KeyS",
+        "commandPalette.open": null,
+      },
+    });
+    expect(normalized.shortcuts["settings.open"]).toBe("Alt+KeyS");
+    expect(normalized.shortcuts["commandPalette.open"]).toBeNull();
+    expect(normalized.shortcuts["workspace.new"]).toBe(
+      DEFAULT_SHORTCUT_BINDINGS["workspace.new"],
+    );
+  });
+
+  it("rejects duplicate shortcut imports with action names", () => {
+    const duplicate = {
+      ...DEFAULT_SETTINGS,
+      shortcuts: {
+        ...DEFAULT_SETTINGS.shortcuts,
+        "workspace.new": DEFAULT_SETTINGS.shortcuts["commandPalette.open"],
+      },
+    };
+    expect(validateSettings(duplicate)).toEqual([
+      "Shortcut Ctrl+KeyK is assigned to both Open command palette and New workspace.",
+    ]);
+    expect(() => importSettings(JSON.stringify(duplicate))).toThrow(
+      /Open command palette and New workspace/,
+    );
+  });
+
+  it("recovers tampered persisted conflicts without discarding unrelated settings", () => {
+    const values = new Map<string, string>([[
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({
+        defaultShellProfileId: "wsl",
+        shortcuts: {
+          "settings.open": "Ctrl+KeyK",
+          "commandPalette.open": "Ctrl+KeyK",
+        },
+      }),
+    ]]);
+    const loaded = loadSettings({ getItem: (key: string) => values.get(key) ?? null });
+    expect(loaded.defaultShellProfileId).toBe("wsl");
+    expect(loaded.shortcuts).toEqual(DEFAULT_SHORTCUT_BINDINGS);
+  });
+
   it("snapshots terminal settings without retaining mutable references", () => {
     const snapshot = snapshotTerminalSettings(DEFAULT_SETTINGS);
     snapshot.appearance.fontSize = 18;
+    const loaded = loadSettings({ getItem: () => null });
+    loaded.shortcuts["settings.open"] = null;
     expect(DEFAULT_SETTINGS.terminal.fontSize).toBe(13);
+    expect(DEFAULT_SETTINGS.shortcuts["settings.open"]).toBe("Ctrl+Comma");
   });
 
   it("normalizes persisted pane snapshots with current settings as fallback", () => {

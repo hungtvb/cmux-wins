@@ -1,11 +1,19 @@
 import {
+  cloneDefaultShortcutBindings,
+  findShortcutConflicts,
+  getShortcutAction,
+  normalizeShortcutBindings,
+  type ShortcutBindings,
+} from "./shortcuts";
+import {
   DEFAULT_TERMINAL_HISTORY_LINES,
   normalizeTerminalHistoryLineLimit,
 } from "./terminalHistory";
 
-export const SETTINGS_VERSION = 3;
-export const SETTINGS_STORAGE_KEY = "tonymux.settings.v3";
+export const SETTINGS_VERSION = 4;
+export const SETTINGS_STORAGE_KEY = "tonymux.settings.v4";
 export const LEGACY_SETTINGS_STORAGE_KEYS = [
+  "tonymux.settings.v3",
   "tonymux.settings.v2",
   "tonymux.settings.v1",
 ] as const;
@@ -61,6 +69,7 @@ export type AppSettings = {
   startupCommand: string;
   terminal: TerminalAppearance;
   persistence: WorkspacePersistenceSettings;
+  shortcuts: ShortcutBindings;
 };
 
 export type TerminalPaneSettings = {
@@ -87,6 +96,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     restoreWorkspaces: true,
     terminalHistoryLines: DEFAULT_TERMINAL_HISTORY_LINES,
   },
+  shortcuts: cloneDefaultShortcutBindings(),
 };
 
 export const DEFAULT_TERMINAL_PANE_SETTINGS: TerminalPaneSettings =
@@ -180,6 +190,7 @@ export function normalizeSettings(value: unknown): AppSettings {
         persistence.terminalHistoryLines,
       ),
     },
+    shortcuts: normalizeShortcutBindings(candidate.shortcuts),
   };
 }
 
@@ -239,6 +250,10 @@ export function validateSettings(settings: AppSettings): string[] {
   if (!settings.terminal.fontFamily.trim()) {
     errors.push("Terminal font family is required.");
   }
+  for (const conflict of findShortcutConflicts(settings.shortcuts)) {
+    const labels = conflict.actionIds.map((actionId) => getShortcutAction(actionId).label);
+    errors.push(`Shortcut ${conflict.binding} is assigned to both ${labels.join(" and ")}.`);
+  }
   return errors;
 }
 
@@ -247,6 +262,7 @@ function cloneDefaultSettings(): AppSettings {
     ...DEFAULT_SETTINGS,
     terminal: { ...DEFAULT_SETTINGS.terminal },
     persistence: { ...DEFAULT_SETTINGS.persistence },
+    shortcuts: cloneDefaultShortcutBindings(),
   };
 }
 
@@ -256,7 +272,13 @@ export function loadSettings(storage: Pick<Storage, "getItem"> = localStorage): 
       storage.getItem(SETTINGS_STORAGE_KEY) ??
       LEGACY_SETTINGS_STORAGE_KEYS.map((key) => storage.getItem(key)).find(Boolean) ??
       null;
-    return raw ? normalizeSettings(JSON.parse(raw)) : cloneDefaultSettings();
+    if (!raw) return cloneDefaultSettings();
+
+    const settings = normalizeSettings(JSON.parse(raw));
+    if (findShortcutConflicts(settings.shortcuts).length > 0) {
+      return { ...settings, shortcuts: cloneDefaultShortcutBindings() };
+    }
+    return settings;
   } catch {
     return cloneDefaultSettings();
   }

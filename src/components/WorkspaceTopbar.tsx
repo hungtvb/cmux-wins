@@ -11,6 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { MouseEvent } from "react";
+import type { ShortcutActionId } from "../shortcuts";
 import type { Workspace, WorkspaceMetadata } from "../types";
 
 type WorkspaceTopbarProps = {
@@ -20,6 +21,8 @@ type WorkspaceTopbarProps = {
   attentionCount: number;
   onToggleSidebar: () => void;
   onOpenCommandPalette: () => void;
+  onOpenSettings: () => void;
+  shortcutLabel: (actionId: ShortcutActionId) => string | undefined;
   onAddWorkspace: () => void;
   onSplitTerminal: () => void;
   onAddBrowser: () => void;
@@ -38,6 +41,8 @@ export function WorkspaceTopbar({
   attentionCount,
   onToggleSidebar,
   onOpenCommandPalette,
+  onOpenSettings,
+  shortcutLabel,
   onAddWorkspace,
   onSplitTerminal,
   onAddBrowser,
@@ -48,6 +53,10 @@ export function WorkspaceTopbar({
   const repository = metadata?.repository || "Local workspace";
   const branch = metadata?.branch || workspace.cwd || "PowerShell · Windows 11";
   const paneLabel = `${workspace.panes.length} pane${workspace.panes.length === 1 ? "" : "s"}`;
+  const titleWithShortcut = (label: string, actionId: ShortcutActionId) => {
+    const shortcut = shortcutLabel(actionId);
+    return shortcut ? `${label} (${shortcut})` : label;
+  };
 
   return (
     <header className="topbar">
@@ -55,7 +64,10 @@ export function WorkspaceTopbar({
         <button
           className="icon-button topbar__sidebar-toggle"
           type="button"
-          title={sidebarOpen ? "Hide sidebar (Ctrl+B)" : "Show sidebar (Ctrl+B)"}
+          title={titleWithShortcut(
+            sidebarOpen ? "Hide sidebar" : "Show sidebar",
+            "layout.toggleSidebar",
+          )}
           aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"}
           onClick={onToggleSidebar}
         >
@@ -91,7 +103,7 @@ export function WorkspaceTopbar({
           className="toolbar-button toolbar-button--primary"
           type="button"
           onClick={onAddWorkspace}
-          title="New workspace (Ctrl+N)"
+          title={titleWithShortcut("New workspace", "workspace.new")}
         >
           <FolderPlus size={15} />
           <span>New workspace</span>
@@ -102,7 +114,7 @@ export function WorkspaceTopbar({
             className="toolbar-button toolbar-button--compact"
             type="button"
             onClick={onSplitTerminal}
-            title="Split terminal (Ctrl+Shift+D)"
+            title={titleWithShortcut("Split terminal", "pane.splitTerminal")}
             aria-label="Split terminal"
           >
             <Columns2 size={15} />
@@ -111,7 +123,7 @@ export function WorkspaceTopbar({
             className="toolbar-button toolbar-button--compact"
             type="button"
             onClick={onAddBrowser}
-            title="Open browser pane (Ctrl+Shift+B)"
+            title={titleWithShortcut("Open browser pane", "pane.openBrowser")}
             aria-label="Open browser pane"
           >
             <Globe2 size={15} />
@@ -133,12 +145,14 @@ export function WorkspaceTopbar({
           className="toolbar-button toolbar-button--command"
           type="button"
           onClick={onOpenCommandPalette}
-          title="Command palette (Ctrl+K)"
+          title={titleWithShortcut("Command palette", "commandPalette.open")}
           aria-label="Open command palette"
         >
           <Search size={15} />
           <span>Commands</span>
-          <kbd>Ctrl K</kbd>
+          {shortcutLabel("commandPalette.open") && (
+            <kbd>{shortcutLabel("commandPalette.open")}</kbd>
+          )}
         </button>
 
         <details className="action-menu">
@@ -153,12 +167,14 @@ export function WorkspaceTopbar({
               type="button"
               onClick={(event: MouseEvent<HTMLButtonElement>) => {
                 closeActionMenu(event);
-                window.dispatchEvent(new Event("tonymux-open-settings"));
+                onOpenSettings();
               }}
             >
               <Settings2 size={14} />
               <span>Settings</span>
-              <kbd>Ctrl ,</kbd>
+              {shortcutLabel("settings.open") && (
+                <kbd>{shortcutLabel("settings.open")}</kbd>
+              )}
             </button>
             <div className="action-menu__label">Workspace</div>
             <button
@@ -171,7 +187,9 @@ export function WorkspaceTopbar({
             >
               <Trash2 size={14} />
               <span>Close workspace</span>
-              <kbd>Ctrl ⇧ W</kbd>
+              {shortcutLabel("workspace.close") && (
+                <kbd>{shortcutLabel("workspace.close")}</kbd>
+              )}
             </button>
           </div>
         </details>

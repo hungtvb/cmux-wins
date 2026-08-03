@@ -10,6 +10,14 @@ import { useAutomationBridge } from "./hooks/useAutomationBridge";
 import { useAutomationEventPublisher } from "./hooks/useAutomationEventPublisher";
 import { useWorkspaceMetadata } from "./hooks/useWorkspaceMetadata";
 import type { AppSettings } from "./settings";
+import { requestOpenSettings } from "./settingsEvents";
+import {
+  formatShortcutBinding,
+  getWorkspaceShortcutActionId,
+  isEditableShortcutTarget,
+  shortcutMatchesEvent,
+  type ShortcutActionId,
+} from "./shortcuts";
 import type { Pane, Workspace } from "./types";
 import {
   WORKSPACE_STATE_VERSION,
@@ -23,9 +31,10 @@ import {
 
 type AppProps = {
   settings: AppSettings;
+  keyboardShortcutsEnabled?: boolean;
 };
 
-export default function App({ settings }: AppProps) {
+export default function App({ settings, keyboardShortcutsEnabled = true }: AppProps) {
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const initialStateRef = useRef<WorkspaceState | null>(null);
@@ -307,25 +316,45 @@ export default function App({ settings }: AppProps) {
     );
   }, [activeWorkspace]);
 
+  const shortcutLabel = useCallback(
+    (actionId: ShortcutActionId): string | undefined => {
+      const binding = settings.shortcuts[actionId];
+      return binding ? formatShortcutBinding(binding) : undefined;
+    },
+    [settings.shortcuts],
+  );
+
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(() => {
-    const workspaceItems: CommandPaletteItem[] = workspaces.map((workspace, index) => ({
-      id: `workspace.select.${workspace.id}`,
-      label: `Switch to ${workspace.title}`,
-      description: workspace.cwd || "Local workspace",
-      keywords: ["switch", "select", "workspace", workspace.title, workspace.cwd],
-      section: "Workspaces",
-      shortcut: index < 9 ? `Ctrl ${index + 1}` : undefined,
-      run: () => selectWorkspace(workspace.id),
-    }));
+    const workspaceItems: CommandPaletteItem[] = workspaces.map((workspace, index) => {
+      const actionId = getWorkspaceShortcutActionId(index);
+      return {
+        id: `workspace.select.${workspace.id}`,
+        label: `Switch to ${workspace.title}`,
+        description: workspace.cwd || "Local workspace",
+        keywords: ["switch", "select", "workspace", workspace.title, workspace.cwd],
+        section: "Workspaces",
+        shortcut: actionId ? shortcutLabel(actionId) : undefined,
+        run: () => selectWorkspace(workspace.id),
+      };
+    });
 
     const actions: CommandPaletteItem[] = [
+      {
+        id: "settings.open",
+        label: "Open settings",
+        description: "Configure shells, terminal behavior, persistence and shortcuts",
+        keywords: ["preferences", "configuration", "keyboard"],
+        section: "General",
+        shortcut: shortcutLabel("settings.open"),
+        run: requestOpenSettings,
+      },
       {
         id: "workspace.new",
         label: "New workspace",
         description: "Create a local developer workspace",
         keywords: ["create", "project", "folder"],
         section: "Actions",
-        shortcut: "Ctrl N",
+        shortcut: shortcutLabel("workspace.new"),
         run: addWorkspace,
       },
       {
@@ -334,7 +363,7 @@ export default function App({ settings }: AppProps) {
         description: "Add another PowerShell terminal pane",
         keywords: ["shell", "powershell", "pane"],
         section: "Actions",
-        shortcut: "Ctrl ⇧ D",
+        shortcut: shortcutLabel("pane.splitTerminal"),
         run: splitTerminalPane,
       },
       {
@@ -343,7 +372,7 @@ export default function App({ settings }: AppProps) {
         description: "Create an embedded WebView2 browser",
         keywords: ["web", "url", "github", "pane"],
         section: "Actions",
-        shortcut: "Ctrl ⇧ B",
+        shortcut: shortcutLabel("pane.openBrowser"),
         run: addBrowserPane,
       },
       {
@@ -352,7 +381,7 @@ export default function App({ settings }: AppProps) {
         description: "Toggle the workspace navigator",
         keywords: ["navigation", "layout", "panel"],
         section: "View",
-        shortcut: "Ctrl B",
+        shortcut: shortcutLabel("layout.toggleSidebar"),
         run: () => setSidebarOpen((open) => !open),
       },
     ];
@@ -375,7 +404,7 @@ export default function App({ settings }: AppProps) {
         description: "Close this workspace and its panes",
         keywords: ["remove", "delete", "workspace"],
         section: "Danger zone",
-        shortcut: "Ctrl ⇧ W",
+        shortcut: shortcutLabel("workspace.close"),
         danger: true,
         run: () => closeWorkspace(activeWorkspace.id),
       });
@@ -390,6 +419,7 @@ export default function App({ settings }: AppProps) {
     clearAttention,
     closeWorkspace,
     selectWorkspace,
+    shortcutLabel,
     sidebarOpen,
     splitTerminalPane,
     workspaces,
@@ -397,10 +427,9 @@ export default function App({ settings }: AppProps) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.altKey) return;
+      if (!keyboardShortcutsEnabled || isEditableShortcutTarget(event.target)) return;
 
-      const key = event.key.toLowerCase();
-      if (key === "k" && !event.shiftKey) {
+      if (shortcutMatchesEvent(settings.shortcuts["commandPalette.open"], event)) {
         event.preventDefault();
         setCommandPaletteOpen(true);
         return;
@@ -408,28 +437,31 @@ export default function App({ settings }: AppProps) {
 
       if (commandPaletteOpen) return;
 
-      if (event.key >= "1" && event.key <= "9") {
-        const workspace = workspaces[Number(event.key) - 1];
-        if (workspace) {
+      for (let index = 0; index < Math.min(workspaces.length, 9); index += 1) {
+        const actionId = getWorkspaceShortcutActionId(index);
+        if (actionId && shortcutMatchesEvent(settings.shortcuts[actionId], event)) {
           event.preventDefault();
-          selectWorkspace(workspace.id);
+          selectWorkspace(workspaces[index].id);
+          return;
         }
-        return;
       }
 
-      if (key === "b" && !event.shiftKey) {
+      if (shortcutMatchesEvent(settings.shortcuts["layout.toggleSidebar"], event)) {
         event.preventDefault();
         setSidebarOpen((open) => !open);
-      } else if (key === "b" && event.shiftKey) {
+      } else if (shortcutMatchesEvent(settings.shortcuts["pane.openBrowser"], event)) {
         event.preventDefault();
         addBrowserPane();
-      } else if (key === "n" && !event.shiftKey) {
+      } else if (shortcutMatchesEvent(settings.shortcuts["workspace.new"], event)) {
         event.preventDefault();
         addWorkspace();
-      } else if (key === "d" && event.shiftKey) {
+      } else if (shortcutMatchesEvent(settings.shortcuts["pane.splitTerminal"], event)) {
         event.preventDefault();
         splitTerminalPane();
-      } else if (key === "w" && event.shiftKey && activeWorkspace) {
+      } else if (
+        activeWorkspace &&
+        shortcutMatchesEvent(settings.shortcuts["workspace.close"], event)
+      ) {
         event.preventDefault();
         closeWorkspace(activeWorkspace.id);
       }
@@ -443,7 +475,9 @@ export default function App({ settings }: AppProps) {
     addWorkspace,
     closeWorkspace,
     commandPaletteOpen,
+    keyboardShortcutsEnabled,
     selectWorkspace,
+    settings.shortcuts,
     splitTerminalPane,
     workspaces,
   ]);
@@ -471,6 +505,8 @@ export default function App({ settings }: AppProps) {
           attentionCount={activeWorkspace.panes.filter((pane) => Boolean(attention[pane.id])).length}
           onToggleSidebar={() => setSidebarOpen((open) => !open)}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+          onOpenSettings={requestOpenSettings}
+          shortcutLabel={shortcutLabel}
           onAddWorkspace={addWorkspace}
           onSplitTerminal={splitTerminalPane}
           onAddBrowser={addBrowserPane}

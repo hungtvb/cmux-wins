@@ -1,6 +1,7 @@
 import {
   Database,
   Download,
+  Keyboard,
   RotateCcw,
   Settings2,
   TerminalSquare,
@@ -28,6 +29,15 @@ import {
   type CursorStyle,
   type ShellProfileId,
 } from "../settings";
+import {
+  DEFAULT_SHORTCUT_BINDINGS,
+  SHORTCUT_ACTIONS,
+  findShortcutConflict,
+  formatShortcutBinding,
+  getShortcutAction,
+  shortcutFromKeyboardEvent,
+  type ShortcutActionId,
+} from "../shortcuts";
 import { MAX_TERMINAL_HISTORY_LINES } from "../terminalHistory";
 
 type SettingsDialogProps = {
@@ -43,6 +53,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
     ...settings,
     terminal: { ...settings.terminal },
     persistence: { ...settings.persistence },
+    shortcuts: { ...settings.shortcuts },
   };
 }
 
@@ -56,17 +67,23 @@ export function SettingsDialog({
   const titleId = useId();
   const descriptionId = useId();
   const historyHelpId = useId();
+  const shortcutsHelpId = useId();
+  const shortcutsStatusId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState(() => cloneSettings(settings));
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
+  const [recordingActionId, setRecordingActionId] = useState<ShortcutActionId | null>(null);
+  const [shortcutError, setShortcutError] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setDraft(cloneSettings(settings));
     setErrors([]);
     setNotice("");
+    setRecordingActionId(null);
+    setShortcutError("");
     requestAnimationFrame(() => {
       dialogRef.current
         ?.querySelector<HTMLElement>(
@@ -89,6 +106,12 @@ export function SettingsDialog({
   };
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape" && recordingActionId) {
+      event.preventDefault();
+      setRecordingActionId(null);
+      setShortcutError("");
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -127,6 +150,75 @@ export function SettingsDialog({
     setDraft(cloneSettings(DEFAULT_SETTINGS));
     setErrors([]);
     setNotice("");
+    setRecordingActionId(null);
+    setShortcutError("");
+  };
+
+  const resetShortcuts = () => {
+    setDraft((current) => ({
+      ...current,
+      shortcuts: { ...DEFAULT_SHORTCUT_BINDINGS },
+    }));
+    setRecordingActionId(null);
+    setShortcutError("");
+    setNotice("Keyboard shortcuts reset to TonyMux defaults.");
+  };
+
+  const clearShortcut = (actionId: ShortcutActionId) => {
+    setDraft((current) => ({
+      ...current,
+      shortcuts: { ...current.shortcuts, [actionId]: null },
+    }));
+    setRecordingActionId(null);
+    setShortcutError("");
+  };
+
+  const recordShortcut = (
+    actionId: ShortcutActionId,
+    event: KeyboardEvent<HTMLButtonElement>,
+  ) => {
+    if (event.key === "Tab") return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      setRecordingActionId(null);
+      setShortcutError("");
+      return;
+    }
+
+    if (
+      (event.key === "Backspace" || event.key === "Delete") &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      clearShortcut(actionId);
+      return;
+    }
+
+    const binding = shortcutFromKeyboardEvent(event);
+    if (!binding) {
+      setShortcutError(
+        "Use Ctrl or Alt with a non-modifier key. Escape cancels; Backspace clears.",
+      );
+      return;
+    }
+
+    const conflictActionId = findShortcutConflict(draft.shortcuts, actionId, binding);
+    if (conflictActionId) {
+      setShortcutError(
+        `${formatShortcutBinding(binding)} is already assigned to ${getShortcutAction(conflictActionId).label}.`,
+      );
+      return;
+    }
+
+    setDraft((current) => ({
+      ...current,
+      shortcuts: { ...current.shortcuts, [actionId]: binding },
+    }));
+    setRecordingActionId(null);
+    setShortcutError("");
   };
 
   const clearSavedWorkspaceState = () => {
@@ -156,6 +248,8 @@ export function SettingsDialog({
     try {
       setDraft(importSettings(await file.text()));
       setErrors([]);
+      setRecordingActionId(null);
+      setShortcutError("");
     } catch (cause) {
       setErrors([`Unable to import settings: ${String(cause)}`]);
     }
@@ -335,6 +429,90 @@ export function SettingsDialog({
                   <small>Disable it for reduced visual motion.</small>
                 </span>
               </label>
+            </div>
+          </section>
+
+          <section className="settings-section" aria-labelledby="settings-shortcuts-title">
+            <div className="settings-section__heading settings-section__heading--actions">
+              <div className="settings-section__heading-main">
+                <Keyboard size={15} aria-hidden="true" />
+                <div>
+                  <h3 id="settings-shortcuts-title">Keyboard shortcuts</h3>
+                  <p id={shortcutsHelpId}>
+                    Select a binding, then press Ctrl or Alt with another key. Physical key positions keep bindings stable across keyboard layouts.
+                  </p>
+                </div>
+              </div>
+              <button
+                className="settings-button settings-button--quiet settings-button--compact"
+                type="button"
+                onClick={resetShortcuts}
+              >
+                <RotateCcw size={13} aria-hidden="true" />
+                Reset shortcuts
+              </button>
+            </div>
+
+            <div
+              className="shortcut-list"
+              role="list"
+              aria-describedby={`${shortcutsHelpId} ${shortcutsStatusId}`}
+            >
+              {SHORTCUT_ACTIONS.map((action) => {
+                const binding = draft.shortcuts[action.id];
+                const recording = recordingActionId === action.id;
+                return (
+                  <div className="shortcut-row" role="listitem" key={action.id}>
+                    <div className="shortcut-row__copy">
+                      <span className="shortcut-row__section">{action.section}</span>
+                      <strong>{action.label}</strong>
+                      <small>{action.description}</small>
+                    </div>
+                    <div className="shortcut-row__actions">
+                      <button
+                        className={`shortcut-recorder${recording ? " shortcut-recorder--recording" : ""}`}
+                        type="button"
+                        aria-pressed={recording}
+                        aria-label={`${action.label}: ${recording ? "press a shortcut" : formatShortcutBinding(binding)}`}
+                        onClick={() => {
+                          setRecordingActionId(recording ? null : action.id);
+                          setShortcutError("");
+                        }}
+                        onKeyDown={(event) => {
+                          if (recording) recordShortcut(action.id, event);
+                        }}
+                        onBlur={() => {
+                          if (recording) setRecordingActionId(null);
+                        }}
+                      >
+                        {recording ? "Press shortcut…" : formatShortcutBinding(binding)}
+                      </button>
+                      <button
+                        className="shortcut-clear"
+                        type="button"
+                        disabled={!binding}
+                        aria-label={`Clear shortcut for ${action.label}`}
+                        title="Clear shortcut"
+                        onClick={() => clearShortcut(action.id)}
+                      >
+                        <X size={13} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div
+              id={shortcutsStatusId}
+              className={`shortcut-status${shortcutError ? " shortcut-status--error" : ""}`}
+              role={shortcutError ? "alert" : "status"}
+              aria-live="polite"
+            >
+              {shortcutError ||
+                (recordingActionId
+                  ? `Recording ${getShortcutAction(recordingActionId).label}. Escape cancels; Backspace clears.`
+                  : "Unassigned actions remain available from visible controls and the command palette.")}
             </div>
           </section>
 

@@ -58,6 +58,8 @@ npm run tauri dev
 
 ## Keyboard shortcuts
 
+These are the defaults. Every binding can be changed or unassigned in **Settings → Keyboard shortcuts**; TonyMux blocks duplicate assignments and uses physical key codes so bindings remain stable across keyboard layouts.
+
 | Shortcut | Action |
 |---|---|
 | `Ctrl+K` | Open command palette |
@@ -71,7 +73,7 @@ npm run tauri dev
 
 ## Settings
 
-Settings are versioned, importable and exportable. Shell executable selection is validated again in Rust and limited to Windows PowerShell, PowerShell 7, Command Prompt and WSL. Changes apply to new terminal panes without restarting existing sessions.
+Settings are versioned, importable and exportable. Shell executable selection is validated again in Rust and limited to Windows PowerShell, PowerShell 7, Command Prompt and WSL. Shortcut bindings are conflict-checked and apply immediately; terminal profile changes apply to new panes without restarting existing sessions.
 
 See [`docs/SETTINGS.md`](docs/SETTINGS.md) and [`docs/SESSION-PERSISTENCE.md`](docs/SESSION-PERSISTENCE.md).
 
