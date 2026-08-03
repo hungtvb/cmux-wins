@@ -102,17 +102,27 @@ Invoke-LoggedCommand "cargo" @(
     "--no-run"
 )
 
-$testExe = Get-ChildItem -Path $targetDeps -Filter "cmux_wins_lib-*.exe" -File |
+# TonyMux renamed the Rust library target from cmux_wins_lib to tonymux_lib.
+# Keep the legacy pattern so older stacked branches remain testable while the
+# rename rolls through the stack.
+$testExecutablePatterns = @(
+    "tonymux_lib-*.exe",
+    "cmux_wins_lib-*.exe"
+)
+$testCandidates = foreach ($pattern in $testExecutablePatterns) {
+    Get-ChildItem -Path $targetDeps -Filter $pattern -File
+}
+$testExe = $testCandidates |
     Where-Object LastWriteTime -GE $buildStarted.AddSeconds(-2) |
     Sort-Object LastWriteTimeUtc -Descending |
     Select-Object -First 1
 if (-not $testExe) {
-    $testExe = Get-ChildItem -Path $targetDeps -Filter "cmux_wins_lib-*.exe" -File |
+    $testExe = $testCandidates |
         Sort-Object LastWriteTimeUtc -Descending |
         Select-Object -First 1
 }
 if (-not $testExe) {
-    throw "Cargo did not produce a cmux_wins_lib unit-test executable in $targetDeps"
+    throw "Cargo did not produce a TonyMux library unit-test executable in $targetDeps (patterns: $($testExecutablePatterns -join ', '))"
 }
 
 $mt = Find-MtExe
@@ -130,7 +140,7 @@ $tempRoot = if ($env:RUNNER_TEMP) {
 } else {
     [System.IO.Path]::GetTempPath()
 }
-$extractedManifest = Join-Path $tempRoot "cmux-unit-test-embedded.manifest"
+$extractedManifest = Join-Path $tempRoot "tonymux-unit-test-embedded.manifest"
 Remove-Item -Force $extractedManifest -ErrorAction SilentlyContinue
 Invoke-LoggedCommand $mt @(
     "-nologo",
