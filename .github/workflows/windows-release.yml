@@ -110,10 +110,11 @@ jobs:
             throw "Expected both MSI and NSIS installers"
           }
 
-          Copy-Item $msi.FullName "release-assets/cmux-windows-$version-x64.msi"
-          Copy-Item $nsis.FullName "release-assets/cmux-windows-$version-x64-setup.exe"
+          Copy-Item $msi.FullName "release-assets/tonymux-$version-x64.msi"
+          Copy-Item $nsis.FullName "release-assets/tonymux-$version-x64-setup.exe"
 
           [ordered]@{
+            product = "TonyMux"
             version = $version
             tag = "${{ steps.version.outputs.tag }}"
             commit = $env:GITHUB_SHA
@@ -131,7 +132,7 @@ jobs:
             } | Set-Content release-assets/SHA256SUMS.txt
 
           $releaseNotes = @'
-          # cmux Windows v__VERSION__
+          # TonyMux v__VERSION__
 
           Automated Windows build produced from commit `__COMMIT__`.
 
@@ -144,12 +145,12 @@ jobs:
           ## Known limitations
           - Installers are not Authenticode-signed yet and may trigger Windows SmartScreen.
           - Interactive Windows 11 QA evidence is tracked in issue #2.
-          - Browser panes, Git/PR metadata, SSH, session restore and the local automation API remain on roadmap issue #12.
+          - The legacy `cmux-cli.exe`, named pipe and local automation config path remain available for compatibility during the TonyMux rename.
 
           ## Verify an installer
 
           ```powershell
-          Get-FileHash .\cmux-windows-__VERSION__-x64-setup.exe -Algorithm SHA256
+          Get-FileHash .\tonymux-__VERSION__-x64-setup.exe -Algorithm SHA256
           ```
 
           Compare the result with `SHA256SUMS.txt` before installation.
@@ -160,7 +161,7 @@ jobs:
       - name: Upload immutable workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cmux-windows-${{ steps.version.outputs.version }}-x64-${{ steps.version.outputs.publish == 'true' && 'release' || 'dry-run' }}
+          name: tonymux-${{ steps.version.outputs.version }}-x64-${{ steps.version.outputs.publish == 'true' && 'release' || 'dry-run' }}
           path: release-assets/*
           if-no-files-found: error
           retention-days: 30
@@ -172,7 +173,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
-          $title = "cmux Windows $tag"
+          $title = "TonyMux $tag"
           $assets = Get-ChildItem release-assets -File | ForEach-Object { $_.FullName }
           $isPrerelease = $tag -match '-(alpha|beta|rc)(\.|$)'
 

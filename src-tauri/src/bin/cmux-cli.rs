@@ -1,7 +1,8 @@
 #[cfg(windows)]
 #[tokio::main]
 async fn main() {
-    match cmux_wins_lib::automation::client::run_cli().await {
+    eprintln!("cmux-cli is a compatibility alias; use tonymux-cli for new integrations.");
+    match tonymux_lib::automation::client::run_cli().await {
         Ok(true) => {}
         Ok(false) => std::process::exit(1),
         Err(error) => {
@@ -30,7 +31,7 @@ fn main() {
             "ok": false,
             "error": {
                 "code": "UNSUPPORTED_PLATFORM",
-                "message": "cmux-cli is supported on Windows only"
+                "message": "cmux-cli is a legacy TonyMux compatibility alias supported on Windows only"
             }
         })
     );

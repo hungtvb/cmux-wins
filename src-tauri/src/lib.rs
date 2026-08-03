@@ -49,5 +49,5 @@ pub fn run() {
             publish_main_frontend_automation_events
         ])
         .run(tauri::generate_context!())
-        .expect("error while running cmux Windows");
+        .expect("error while running TonyMux");
 }

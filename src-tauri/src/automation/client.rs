@@ -82,7 +82,7 @@ pub async fn run_cli() -> Result<bool, String> {
         }
         CliAction::Call { method, params } => call(method, params)
             .await
-            .map_err(|error| format!("unable to call cmux automation endpoint: {error}"))?,
+            .map_err(|error| format!("unable to call TonyMux automation endpoint: {error}"))?,
         CliAction::RunTerminal {
             session_id,
             command,
