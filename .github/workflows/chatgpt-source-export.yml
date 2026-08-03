@@ -1,0 +1,56 @@
+name: ChatGPT Source Export
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/chatgpt-source-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository and full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact PR base commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "${{ github.event.pull_request.base.sha }}"
+          git config --local --unset-all http.https://github.com/.extraheader || true
+
+      - name: Package exact source snapshot with Git history
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="$RUNNER_TEMP/${GITHUB_REPOSITORY#*/}-main-with-git.tar.gz"
+          checksum="$archive.sha256"
+
+          tar -C "$GITHUB_WORKSPACE" -czf "$archive" .
+          test -s "$archive"
+
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$(basename "$archive")" > "$(basename "$checksum")"
+          )
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-main-with-git
+          path: |
+            ${{ runner.temp }}/${{ github.event.repository.name }}-main-with-git.tar.gz
+            ${{ runner.temp }}/${{ github.event.repository.name }}-main-with-git.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
