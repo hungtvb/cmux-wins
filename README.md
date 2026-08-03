@@ -1,63 +1,32 @@
-# cmux Windows
+# TonyMux
 
-A Windows 11 port of the core [cmux](https://github.com/manaflow-ai/cmux) workflow: vertical workspaces, split terminal panes, embedded browser surfaces, development metadata, and agent-attention notifications.
+**TonyMux** is a Windows 11 developer workspace for terminal-driven and AI-assisted workflows. It brings the useful workspace model popularized by [cmux](https://github.com/manaflow-ai/cmux) to Windows using Tauri, React, xterm.js, Rust, WebView2 and ConPTY.
 
-The upstream application is native macOS software built with Swift, AppKit, and GhosttyKit. This project is therefore a platform port, not a direct recompilation. The Windows shell uses Tauri, React, xterm.js, Rust, WebView2, and the Windows ConPTY API through `portable-pty`.
+TonyMux is a platform port and independent Windows implementation, not a direct recompilation of the macOS application.
 
-## Delivery stack
+## Current capabilities
 
-The work is split into reviewable stacked pull requests:
+- Persistent vertical workspaces
+- Multiple ConPTY terminal panes
+- Native WebView2 browser panes
+- Git branch, dirty state, pull request and listening-port metadata
+- Agent-attention notifications from OSC 9/99/777
+- Current-user named-pipe automation API
+- Workspace, pane, terminal and event automation
+- Searchable `Ctrl+K` command palette
+- MSI and NSIS Windows installers
 
-1. `feat/windows-mvp` — terminal/workspace MVP, QA harness, installers and release pipeline
-2. `feat/browser-panes` — native child WebView2 browser panes
-3. `feat/workspace-metadata` — Git, pull request and workspace-owned listening-port metadata
-4. `feat/local-automation` — current-user named-pipe protocol and `cmux-cli`
-5. `feat/automation-workspaces` — acknowledged workspace and pane automation methods
-
-Do not merge a stacked PR before its base PR.
-
-## Implemented baseline
-
-- Native Windows desktop shell through Tauri/WebView2
-- Vertical workspace sidebar
-- Multiple persistent workspaces
-- PowerShell terminals backed by ConPTY
-- Split terminal panes
-- Terminal resize and process cleanup
-- Workspace close lifecycle with PTY cleanup
-- Keyboard shortcuts for common workspace actions
-- OSC 9/99/777 agent-attention detection
-- Per-pane attention ring and unread workspace indicator
-- MSI and NSIS bundle configuration
-- Windows CI for frontend, Rust, ConPTY and installer artifacts
-
-Implemented on later stacked branches:
-
-- Native WebView2 browser panes and navigation controls
-- Git repository, branch, dirty state, PR and workspace-owned port metadata
-- Versioned local named-pipe transport and machine-readable CLI
-- Allowlisted workspace and pane list/create/select/close methods
-- Bounded Rust-to-React request acknowledgement bridge
-
-Roadmap work still includes:
-
-- Bounded terminal input/output/events for local agents
-- SSH workspace orchestration
-- Session scrollback restoration
-- Settings UI and keyboard shortcut editor
-- Ghostty renderer/config compatibility
+The repository is delivered through stacked pull requests. Do not merge a stacked PR before its base PR.
 
 ## Prerequisites
 
-Install these on Windows 11:
+Install on Windows 11:
 
 1. Git
 2. Node.js 20 or newer
 3. Rust stable with the MSVC toolchain
-4. Microsoft Visual Studio Build Tools 2022 with **Desktop development with C++**
+4. Visual Studio Build Tools 2022 with **Desktop development with C++**
 5. Microsoft Edge WebView2 Runtime
-
-Using `winget`:
 
 ```powershell
 winget install --id Git.Git -e
@@ -67,20 +36,19 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools -e
 winget install --id Microsoft.EdgeWebView2Runtime -e
 ```
 
-Open Visual Studio Installer after installing Build Tools and enable **Desktop development with C++**.
-
 ## Run in development
+
+The GitHub repository keeps its current name until the stacked PR chain is resolved:
 
 ```powershell
 git clone https://github.com/hungtvb/cmux-wins.git
 cd cmux-wins
-git switch feat/windows-mvp
-
+git switch chore/rename-tonymux
 npm install
 npm run tauri dev
 ```
 
-The default shell is Windows PowerShell. Override it before launching when needed:
+The default shell is Windows PowerShell. `CMUX_SHELL` remains the supported override during the compatibility period:
 
 ```powershell
 $env:CMUX_SHELL = "pwsh.exe"
@@ -91,120 +59,66 @@ npm run tauri dev
 
 | Shortcut | Action |
 |---|---|
+| `Ctrl+K` | Open command palette |
 | `Ctrl+N` | Create workspace |
 | `Ctrl+1` … `Ctrl+9` | Switch workspace |
 | `Ctrl+B` | Toggle sidebar |
-| `Ctrl+Shift+B` | Add browser pane on the browser branch |
+| `Ctrl+Shift+B` | Add browser pane |
 | `Ctrl+Shift+D` | Split terminal |
 | `Ctrl+Shift+W` | Close current workspace |
 
-## Build installers
+## Build and verify
 
 ```powershell
 npm install
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 npm run tauri build
 ```
 
-Generated MSI and NSIS installers are written under `src-tauri\target\release\bundle`.
+The installer workflow publishes the `tonymux-windows-installers` artifact.
 
-The Windows CI workflow uploads both installers as the `cmux-windows-installers` artifact after the compile checks pass.
-
-## Local Windows verification
-
-When GitHub-hosted runners are unavailable, run the same critical gates on a Windows 11 development machine:
+For the full Windows verification harness:
 
 ```powershell
-git switch feat/automation-workspaces
 powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1
-```
-
-This runs:
-
-- frontend reducer tests
-- TypeScript and Vite build
-- Rust `cargo check --all-targets`
-- Rust unit tests
-- real Windows ConPTY integration tests
-- release builds for the desktop app and `cmux-cli.exe`
-
-After dependencies are already installed:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1 -SkipNpmInstall
-```
-
-Run the full named-pipe/UI automation smoke as an isolated app session:
-
-```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1 -AutomationSmoke
 ```
 
-The automation smoke starts the release desktop executable, waits for both the pipe and React bridge to become ready, then verifies `ping`, `info`, workspace create/list/close, terminal pane create/close and native browser pane create/close. It refuses to run while another `cmux-wins` process is open and force-stops only the process it started.
+## Automation CLI
 
-## Local automation CLI
-
-Transport-only health commands are available on `feat/local-automation`. Workspace and pane methods are available on `feat/automation-workspaces`.
-
-Start the desktop app first:
+Build both the TonyMux CLI and the temporary compatibility alias:
 
 ```powershell
-git switch feat/automation-workspaces
-npm install
-npm run tauri dev
+cargo build --manifest-path src-tauri/Cargo.toml --release --bin tonymux-cli --bin cmux-cli
 ```
 
-Build the CLI:
+Use the new command name:
 
 ```powershell
-cargo build --manifest-path src-tauri/Cargo.toml --release --bin cmux-cli
+.\src-tauri\target\release\tonymux-cli.exe ping
+.\src-tauri\target\release\tonymux-cli.exe info
+.\src-tauri\target\release\tonymux-cli.exe workspace list
+.\src-tauri\target\release\tonymux-cli.exe workspace create "Agent work" --cwd C:\code\project
+.\src-tauri\target\release\tonymux-cli.exe pane terminal <workspace-id>
+.\src-tauri\target\release\tonymux-cli.exe pane browser <workspace-id> https://example.com
+.\src-tauri\target\release\tonymux-cli.exe terminal run <session-id> "Write-Output ok"
+.\src-tauri\target\release\tonymux-cli.exe event read --wait-ms 30000
 ```
 
-Health and identity:
+`cmux-cli.exe` remains available as a deprecated alias so existing scripts keep working during the rename.
 
-```powershell
-.\src-tauri\target\release\cmux-cli.exe ping
-.\src-tauri\target\release\cmux-cli.exe info
-```
+## Compatibility during the rename
 
-Workspace lifecycle:
+To preserve upgrades, existing workspaces and automation clients, these internal identifiers intentionally remain unchanged for now:
 
-```powershell
-.\src-tauri\target\release\cmux-cli.exe workspace list
-.\src-tauri\target\release\cmux-cli.exe workspace create "Agent work" --cwd C:\code\project
-.\src-tauri\target\release\cmux-cli.exe workspace create "Background" --no-activate
-.\src-tauri\target\release\cmux-cli.exe workspace select <workspace-id>
-.\src-tauri\target\release\cmux-cli.exe workspace close <workspace-id>
-```
+- Tauri application identifier: `com.hungtvb.cmuxwins`
+- Workspace localStorage keys: `cmux-wins.workspaces.*`
+- Automation config: `%LOCALAPPDATA%\cmux-windows\automation-v1.json`
+- Named pipe prefix: `cmux-windows-v1-*`
+- Shell override: `CMUX_SHELL`
 
-Pane lifecycle:
-
-```powershell
-.\src-tauri\target\release\cmux-cli.exe pane terminal <workspace-id>
-.\src-tauri\target\release\cmux-cli.exe pane browser <workspace-id> https://example.com
-.\src-tauri\target\release\cmux-cli.exe pane close <workspace-id> <pane-id>
-```
-
-The CLI prints machine-readable JSON. Endpoint discovery and its random token are stored in:
-
-```text
-%LOCALAPPDATA%\cmux-windows\automation-v1.json
-```
-
-The named pipe is protected with a DACL for the current Windows user, rejects remote clients, enforces protocol version 1, bounds request/response sizes, and exposes only allowlisted methods. The workspace bridge targets only the local `main` webview and requires an acknowledged response. There is no raw-method or generic shell-execution endpoint. See [`docs/AUTOMATION-PROTOCOL.md`](docs/AUTOMATION-PROTOCOL.md).
-
-## Agent notification smoke test
-
-Run this inside a cmux Windows terminal pane:
-
-```powershell
-Write-Host "`e]9;Agent requires approval`a" -NoNewline
-```
-
-The pane should receive a blue attention ring. If the workspace is not active, its sidebar item should show an unread bell.
-
-## Architecture
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the platform mapping and delivery phases.
+See [`docs/BRANDING.md`](docs/BRANDING.md) for the migration policy.
 
 ## License
 

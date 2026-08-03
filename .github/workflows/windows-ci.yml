@@ -2,7 +2,7 @@ name: Windows CI
 
 on:
   push:
-    branches: [main, "feat/**"]
+    branches: [main, "feat/**", "chore/**"]
   pull_request:
 
 jobs:
@@ -161,14 +161,16 @@ jobs:
         shell: pwsh
         run: exit 1
 
-      - name: Build automation CLI
-        run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin cmux-cli
+      - name: Build automation CLIs
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin tonymux-cli --bin cmux-cli
 
-      - name: Upload automation CLI
+      - name: Upload automation CLIs
         uses: actions/upload-artifact@v4
         with:
-          name: cmux-cli-windows-x64
-          path: src-tauri/target/release/cmux-cli.exe
+          name: tonymux-cli-windows-x64
+          path: |
+            src-tauri/target/release/tonymux-cli.exe
+            src-tauri/target/release/cmux-cli.exe
           if-no-files-found: error
           retention-days: 7
 
@@ -203,7 +205,7 @@ jobs:
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
-          name: cmux-windows-installers
+          name: tonymux-windows-installers
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*-setup.exe

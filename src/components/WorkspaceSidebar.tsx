@@ -39,9 +39,9 @@ export function WorkspaceSidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        <div className="sidebar__logo">cm</div>
+        <div className="sidebar__logo">TM</div>
         <div className="sidebar__brand-copy">
-          <strong>cmux</strong>
+          <strong>TonyMux</strong>
           <span>Developer workspace</span>
         </div>
         <span className="sidebar__platform">Windows</span>
