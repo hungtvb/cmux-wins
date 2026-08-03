@@ -14,6 +14,7 @@ TonyMux is a platform port and independent Windows implementation, not a direct 
 - Current-user named-pipe automation API
 - Workspace, pane, terminal and event automation
 - Searchable `Ctrl+K` command palette
+- Versioned Settings UI with allowlisted shell profiles
 - MSI and NSIS Windows installers
 
 The repository is delivered through stacked pull requests. Do not merge a stacked PR before its base PR.
@@ -43,7 +44,7 @@ The GitHub repository keeps its current name until the stacked PR chain is resol
 ```powershell
 git clone https://github.com/hungtvb/cmux-wins.git
 cd cmux-wins
-git switch chore/rename-tonymux
+git switch feat/tonymux-settings
 npm install
 npm run tauri dev
 ```
@@ -60,12 +61,19 @@ npm run tauri dev
 | Shortcut | Action |
 |---|---|
 | `Ctrl+K` | Open command palette |
+| `Ctrl+,` | Open Settings |
 | `Ctrl+N` | Create workspace |
 | `Ctrl+1` … `Ctrl+9` | Switch workspace |
 | `Ctrl+B` | Toggle sidebar |
 | `Ctrl+Shift+B` | Add browser pane |
 | `Ctrl+Shift+D` | Split terminal |
 | `Ctrl+Shift+W` | Close current workspace |
+
+## Settings
+
+Settings are versioned, importable and exportable. Shell executable selection is validated again in Rust and limited to Windows PowerShell, PowerShell 7, Command Prompt and WSL. Changes apply to new terminal panes without restarting existing sessions.
+
+See [`docs/SETTINGS.md`](docs/SETTINGS.md).
 
 ## Build and verify
 

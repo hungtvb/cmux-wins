@@ -12,11 +12,14 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
+    env,
     io::{Read, Write},
     sync::{Arc, Mutex},
     thread,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+
+const MAX_STARTUP_COMMAND_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +89,42 @@ impl AppState {
     }
 }
 
+fn shell_for_profile(profile_id: &str) -> Result<&'static str, String> {
+    match profile_id {
+        "windows-powershell" => Ok("powershell.exe"),
+        "powershell-7" => Ok("pwsh.exe"),
+        "command-prompt" => Ok("cmd.exe"),
+        "wsl" => Ok("wsl.exe"),
+        _ => Err(format!("unsupported shell profile: {profile_id}")),
+    }
+}
+
+fn resolve_shell(profile_id: &str) -> Result<String, String> {
+    let default_shell = shell_for_profile(profile_id)?;
+    Ok(env::var("CMUX_SHELL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_shell.to_owned()))
+}
+
+fn validate_startup_command(command: Option<String>) -> Result<Option<String>, String> {
+    let Some(command) = command.map(|value| value.trim().to_owned()) else {
+        return Ok(None);
+    };
+    if command.is_empty() {
+        return Ok(None);
+    }
+    if command.len() > MAX_STARTUP_COMMAND_BYTES {
+        return Err(format!(
+            "startup command exceeds {MAX_STARTUP_COMMAND_BYTES} byte limit"
+        ));
+    }
+    if command.bytes().any(|value| matches!(value, b'\0' | b'\r' | b'\n')) {
+        return Err("startup command must be a single line without NUL bytes".to_owned());
+    }
+    Ok(Some(command))
+}
+
 fn emit_output(app: &AppHandle, session_id: &str, data: impl Into<String>) {
     let _ = app.emit(
         "terminal-output",
@@ -99,7 +138,7 @@ fn emit_output(app: &AppHandle, session_id: &str, data: impl Into<String>) {
 fn publish_terminal_event(app: &AppHandle, kind: &str, payload: Value) {
     let store = app.state::<AutomationEventStore>();
     if let Err(error) = store.publish(kind, payload) {
-        eprintln!("[cmux automation] unable to publish {kind}: {error}");
+        eprintln!("[TonyMux automation] unable to publish {kind}: {error}");
     }
 }
 
@@ -110,6 +149,8 @@ pub(crate) fn spawn_terminal(
     workspace_id: String,
     session_id: String,
     cwd: Option<String>,
+    shell_profile_id: String,
+    startup_command: Option<String>,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
@@ -123,6 +164,9 @@ pub(crate) fn spawn_terminal(
         }
     }
 
+    let shell = resolve_shell(&shell_profile_id)?;
+    let startup_command = validate_startup_command(startup_command)?;
+
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -133,7 +177,6 @@ pub(crate) fn spawn_terminal(
         })
         .map_err(|error| format!("unable to open ConPTY: {error}"))?;
 
-    let shell = std::env::var("CMUX_SHELL").unwrap_or_else(|_| "powershell.exe".to_owned());
     let mut command = CommandBuilder::new(&shell);
     let shell_name = shell.to_ascii_lowercase();
     if shell_name.contains("powershell") || shell_name.contains("pwsh") {
@@ -153,10 +196,21 @@ pub(crate) fn spawn_terminal(
         .master
         .try_clone_reader()
         .map_err(|error| format!("unable to open PTY reader: {error}"))?;
-    let writer = pair
+    let mut writer = pair
         .master
         .take_writer()
         .map_err(|error| format!("unable to open PTY writer: {error}"))?;
+
+    if let Some(startup_command) = startup_command.as_deref() {
+        if let Err(error) = writer
+            .write_all(startup_command.as_bytes())
+            .and_then(|_| writer.write_all(b"\r"))
+            .and_then(|_| writer.flush())
+        {
+            let _ = child.kill();
+            return Err(format!("unable to send startup command: {error}"));
+        }
+    }
 
     drop(pair.slave);
 
@@ -195,6 +249,7 @@ pub(crate) fn spawn_terminal(
             "generation": generation,
             "processId": process_id,
             "shell": shell,
+            "shellProfileId": shell_profile_id,
         }),
     );
 
@@ -215,7 +270,7 @@ pub(crate) fn spawn_terminal(
                 }
                 Err(error) => {
                     let message = format!("terminal read error: {error}");
-                    let rendered = format!("\r\n[cmux] {message}\r\n");
+                    let rendered = format!("\r\n[TonyMux] {message}\r\n");
                     let app_state = app.state::<AppState>();
                     app_state.terminal_automation.record_output(
                         &session_id,
@@ -419,4 +474,31 @@ pub(crate) async fn get_workspace_metadata_batch(
     };
 
     inspect_workspace_metadata_batch(requests, roots_by_workspace).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_profiles_are_allowlisted() {
+        assert_eq!(shell_for_profile("windows-powershell").unwrap(), "powershell.exe");
+        assert_eq!(shell_for_profile("powershell-7").unwrap(), "pwsh.exe");
+        assert_eq!(shell_for_profile("command-prompt").unwrap(), "cmd.exe");
+        assert_eq!(shell_for_profile("wsl").unwrap(), "wsl.exe");
+        assert!(shell_for_profile("custom.exe").is_err());
+    }
+
+    #[test]
+    fn startup_command_is_bounded_and_single_line() {
+        assert_eq!(
+            validate_startup_command(Some("  npm run dev  ".to_owned())).unwrap(),
+            Some("npm run dev".to_owned())
+        );
+        assert_eq!(validate_startup_command(Some("  ".to_owned())).unwrap(), None);
+        assert!(validate_startup_command(Some("echo one\necho two".to_owned())).is_err());
+        assert!(
+            validate_startup_command(Some("x".repeat(MAX_STARTUP_COMMAND_BYTES + 1))).is_err()
+        );
+    }
 }
