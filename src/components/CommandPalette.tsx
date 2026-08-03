@@ -1,6 +1,6 @@
 import { CornerDownLeft, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import { filterCommandPaletteItems, type CommandPaletteItem } from "./commandPalette";
+import { filterCommandPaletteItems, type CommandPaletteItem } from "./commandPaletteModel";
 
 type CommandPaletteProps = {
   open: boolean;

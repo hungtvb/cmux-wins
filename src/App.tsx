@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserPane } from "./components/BrowserPane";
 import { CommandPalette } from "./components/CommandPalette";
-import type { CommandPaletteItem } from "./components/commandPalette";
+import type { CommandPaletteItem } from "./components/commandPaletteModel";
 import { ResizablePaneGrid } from "./components/ResizablePaneGrid";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
