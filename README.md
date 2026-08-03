@@ -121,7 +121,7 @@ Use the new command name:
 To preserve upgrades, existing workspaces and automation clients, these internal identifiers intentionally remain unchanged for now:
 
 - Tauri application identifier: `com.hungtvb.cmuxwins`
-- Legacy workspace localStorage keys: `cmux-wins.workspaces.*` migrate into `tonymux.workspaces.v3`
+- Legacy workspace localStorage keys and `tonymux.workspaces.v3*` migrate into the bounded `tonymux.workspaces.v4` envelope
 - Automation config: `%LOCALAPPDATA%\cmux-windows\automation-v1.json`
 - Named pipe prefix: `cmux-windows-v1-*`
 - Shell override: `CMUX_SHELL`

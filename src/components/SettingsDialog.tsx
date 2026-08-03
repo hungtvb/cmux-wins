@@ -28,6 +28,7 @@ import {
   type CursorStyle,
   type ShellProfileId,
 } from "../settings";
+import { MAX_TERMINAL_HISTORY_LINES } from "../terminalHistory";
 
 type SettingsDialogProps = {
   open: boolean;
@@ -54,6 +55,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
+  const historyHelpId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState(() => cloneSettings(settings));
@@ -362,8 +364,32 @@ export function SettingsDialog({
                 />
                 <span>
                   <strong>Restore workspaces on launch</strong>
-                  <small>Stores pane type, layout, title, directory, browser URL and terminal profile snapshot.</small>
+                  <small>Stores bounded layout metadata and, when enabled below, inert terminal history.</small>
                 </span>
+              </label>
+              <label className="settings-field settings-field--wide">
+                <span>Restored terminal history lines</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_TERMINAL_HISTORY_LINES}
+                  step={100}
+                  value={draft.persistence.terminalHistoryLines}
+                  disabled={!draft.persistence.restoreWorkspaces}
+                  aria-describedby={historyHelpId}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDraft((current) => ({
+                      ...current,
+                      persistence: {
+                        ...current.persistence,
+                        terminalHistoryLines: Number(event.target.value),
+                      },
+                    }))
+                  }
+                />
+                <small id={historyHelpId}>
+                  Use 0 to disable history. TonyMux stores at most 5,000 lines, 512 KiB per pane and 4 MiB total.
+                </small>
               </label>
               <div className="settings-persistence-action settings-field--wide">
                 <div>

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type AppSettings } from "./settings";
 import {
+  MAX_TERMINAL_HISTORY_BYTES_TOTAL,
+  terminalHistoryByteLength,
+} from "./terminalHistory";
+import {
   LEGACY_WORKSPACE_STORAGE_KEYS,
   MAX_SPLIT_RATIO,
   MIN_SPLIT_RATIO,
@@ -30,7 +34,7 @@ function memoryStorage(initial: Record<string, string> = {}) {
 
 const disabledSettings: AppSettings = {
   ...DEFAULT_SETTINGS,
-  persistence: { restoreWorkspaces: false },
+  persistence: { restoreWorkspaces: false, terminalHistoryLines: 0 },
 };
 
 describe("workspace persistence", () => {
@@ -110,7 +114,7 @@ describe("workspace persistence", () => {
         workspaces: [{ id: "future", panes: [{ id: "future-pane", kind: "terminal" }] }],
       }),
       [WORKSPACE_STATE_PREVIOUS_KEY]: JSON.stringify({
-        version: 3,
+        version: 4,
         workspaces: [{ id: "safe", title: "Safe", panes: [{ id: "safe-pane", kind: "terminal" }] }],
       }),
     });
@@ -173,19 +177,114 @@ describe("workspace persistence", () => {
     expect(storage.has(LEGACY_WORKSPACE_STORAGE_KEYS[0])).toBe(false);
   });
 
+
+  it("migrates v3 workspace metadata without requiring terminal history", () => {
+    const storage = memoryStorage({
+      [LEGACY_WORKSPACE_STORAGE_KEYS[0]]: JSON.stringify({
+        version: 3,
+        workspaces: [
+          { id: "w1", title: "Version 3", panes: [{ id: "p1", kind: "terminal" }] },
+        ],
+      }),
+    });
+
+    const result = loadWorkspaceState(DEFAULT_SETTINGS, storage, idFactory("unused"));
+    expect(result.status).toBe("migrated");
+    expect(result.state.version).toBe(4);
+    expect(result.state.workspaces[0].panes[0]).not.toHaveProperty("historySnapshot");
+  });
+
+  it("stores only bounded inert terminal history", () => {
+    const settings: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      persistence: { ...DEFAULT_SETTINGS.persistence, terminalHistoryLines: 2 },
+    };
+    const state = normalizeWorkspaceState(
+      {
+        workspaces: [
+          {
+            id: "w1",
+            panes: [
+              {
+                id: "p1",
+                kind: "terminal",
+                historySnapshot: "old\nkeep\n\u001b]0;owned\u0007new\u001b[31m!\u001b[0m",
+              },
+            ],
+          },
+        ],
+      },
+      settings,
+    );
+
+    expect(state.workspaces[0].panes[0]).toMatchObject({
+      kind: "terminal",
+      historySnapshot: "keep\nnew!",
+    });
+  });
+
+  it("enforces the whole-envelope history byte budget", () => {
+    const payload = "x".repeat(600 * 1024);
+    const state = normalizeWorkspaceState({
+      workspaces: [
+        {
+          id: "w1",
+          panes: Array.from({ length: 10 }, (_, index) => ({
+            id: `p${index}`,
+            kind: "terminal",
+            historySnapshot: payload,
+          })),
+        },
+      ],
+    });
+    const totalBytes = state.workspaces[0].panes.reduce(
+      (total, pane) =>
+        total + (pane.kind === "terminal" ? terminalHistoryByteLength(pane.historySnapshot ?? "") : 0),
+      0,
+    );
+
+    expect(totalBytes).toBeLessThanOrEqual(MAX_TERMINAL_HISTORY_BYTES_TOTAL);
+  });
+
+  it("removes history from both saved generations when retention is disabled", () => {
+    const storage = memoryStorage();
+    const state = {
+      workspaces: [
+        {
+          id: "w1",
+          title: "History",
+          panes: [{ id: "p1", kind: "terminal", historySnapshot: "secret" }],
+        },
+      ],
+    };
+
+    saveWorkspaceState(state, DEFAULT_SETTINGS, storage);
+    saveWorkspaceState(state, DEFAULT_SETTINGS, storage);
+    storage.setItem(WORKSPACE_STATE_STORAGE_KEY, "{corrupt");
+    const noHistorySettings: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      persistence: { ...DEFAULT_SETTINGS.persistence, terminalHistoryLines: 0 },
+    };
+    saveWorkspaceState(state, noHistorySettings, storage);
+
+    expect(storage.value(WORKSPACE_STATE_STORAGE_KEY)).not.toContain("secret");
+    expect(storage.value(WORKSPACE_STATE_PREVIOUS_KEY)).not.toContain("secret");
+  });
+
+
   it("disables restore and clears only workspace keys", () => {
     const storage = memoryStorage({
       [WORKSPACE_STATE_STORAGE_KEY]: "saved",
       [WORKSPACE_STATE_PREVIOUS_KEY]: "previous",
       [LEGACY_WORKSPACE_STORAGE_KEYS[0]]: "legacy",
-      "tonymux.settings.v2": "settings",
+      "tonymux.settings.v3": "settings",
     });
 
     saveWorkspaceState({}, disabledSettings, storage);
     expect(storage.has(WORKSPACE_STATE_STORAGE_KEY)).toBe(false);
     expect(storage.has(WORKSPACE_STATE_PREVIOUS_KEY)).toBe(false);
     expect(storage.has(LEGACY_WORKSPACE_STORAGE_KEYS[0])).toBe(false);
-    expect(storage.value("tonymux.settings.v2")).toBe("settings");
+    expect(storage.value("tonymux.settings.v3")).toBe("settings");
     expect(loadWorkspaceState(disabledSettings, storage, idFactory("w", "p")).status).toBe("disabled");
   });
 
@@ -193,16 +292,16 @@ describe("workspace persistence", () => {
     const storage = memoryStorage({
       [WORKSPACE_STATE_STORAGE_KEY]: "saved",
       [WORKSPACE_STATE_PREVIOUS_KEY]: "previous",
-      [LEGACY_WORKSPACE_STORAGE_KEYS[0]]: "legacy-v2",
-      [LEGACY_WORKSPACE_STORAGE_KEYS[1]]: "legacy-v1",
-      "tonymux.settings.v2": "settings",
+      ...Object.fromEntries(
+        LEGACY_WORKSPACE_STORAGE_KEYS.map((key, index) => [key, `legacy-${index}`]),
+      ),
+      "tonymux.settings.v3": "settings",
     });
 
     clearWorkspaceState(storage);
     expect(storage.has(WORKSPACE_STATE_STORAGE_KEY)).toBe(false);
     expect(storage.has(WORKSPACE_STATE_PREVIOUS_KEY)).toBe(false);
-    expect(storage.has(LEGACY_WORKSPACE_STORAGE_KEYS[0])).toBe(false);
-    expect(storage.has(LEGACY_WORKSPACE_STORAGE_KEYS[1])).toBe(false);
-    expect(storage.value("tonymux.settings.v2")).toBe("settings");
+    for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) expect(storage.has(key)).toBe(false);
+    expect(storage.value("tonymux.settings.v3")).toBe("settings");
   });
 });

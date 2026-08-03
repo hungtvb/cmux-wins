@@ -184,6 +184,19 @@
   color: var(--text-primary);
 }
 
+.settings-field small {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 450;
+  line-height: 1.45;
+}
+
+.settings-field input:disabled,
+.settings-field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .settings-field input::placeholder {
   color: #5f6a7b;
 }

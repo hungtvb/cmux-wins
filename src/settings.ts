@@ -1,6 +1,14 @@
-export const SETTINGS_VERSION = 2;
-export const SETTINGS_STORAGE_KEY = "tonymux.settings.v2";
-export const LEGACY_SETTINGS_STORAGE_KEYS = ["tonymux.settings.v1"] as const;
+import {
+  DEFAULT_TERMINAL_HISTORY_LINES,
+  normalizeTerminalHistoryLineLimit,
+} from "./terminalHistory";
+
+export const SETTINGS_VERSION = 3;
+export const SETTINGS_STORAGE_KEY = "tonymux.settings.v3";
+export const LEGACY_SETTINGS_STORAGE_KEYS = [
+  "tonymux.settings.v2",
+  "tonymux.settings.v1",
+] as const;
 
 export const SHELL_PROFILES = [
   {
@@ -43,6 +51,7 @@ export type TerminalAppearance = {
 
 export type WorkspacePersistenceSettings = {
   restoreWorkspaces: boolean;
+  terminalHistoryLines: number;
 };
 
 export type AppSettings = {
@@ -76,6 +85,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   },
   persistence: {
     restoreWorkspaces: true,
+    terminalHistoryLines: DEFAULT_TERMINAL_HISTORY_LINES,
   },
 };
 
@@ -166,6 +176,9 @@ export function normalizeSettings(value: unknown): AppSettings {
         typeof persistence.restoreWorkspaces === "boolean"
           ? persistence.restoreWorkspaces
           : DEFAULT_SETTINGS.persistence.restoreWorkspaces,
+      terminalHistoryLines: normalizeTerminalHistoryLineLimit(
+        persistence.terminalHistoryLines,
+      ),
     },
   };
 }

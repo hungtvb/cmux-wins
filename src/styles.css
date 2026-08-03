@@ -701,6 +701,100 @@ input:focus-visible {
   isolation: isolate;
 }
 
+.terminal-pane--with-history {
+  grid-template-rows: 35px clamp(104px, 28%, 220px) minmax(0, 1fr);
+}
+
+.terminal-pane__restored-history {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 28px minmax(0, 1fr) 31px;
+  border-bottom: 1px solid rgba(128, 164, 255, 0.24);
+  background:
+    linear-gradient(180deg, rgba(128, 164, 255, 0.05), transparent 46%),
+    #0c1017;
+}
+
+.terminal-pane__history-heading,
+.terminal-pane__history-divider {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  color: #8f99aa;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
+.terminal-pane__history-heading {
+  border-bottom: 1px solid rgba(128, 164, 255, 0.1);
+}
+
+.terminal-pane__history-heading > svg {
+  flex: 0 0 auto;
+  color: #8daaff;
+}
+
+.terminal-pane__history-heading > span:first-of-type {
+  overflow: hidden;
+  color: #aab5c8;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-pane__history-heading > span:last-of-type {
+  margin-left: auto;
+  color: #748095;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.terminal-pane__restored-history pre {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 11px;
+  overflow: auto;
+  color: #8e99aa;
+  font-family: var(
+    --restored-history-font-family,
+    "Cascadia Code", "Cascadia Mono", Consolas, monospace
+  );
+  font-size: var(--restored-history-font-size, 13px);
+  line-height: var(--restored-history-line-height, 1.25);
+  tab-size: 4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.terminal-pane__restored-history pre:focus-visible {
+  outline: 1px solid rgba(128, 164, 255, 0.72);
+  outline-offset: -2px;
+}
+
+.terminal-pane__history-divider {
+  justify-content: space-between;
+  border-top: 1px solid rgba(128, 164, 255, 0.18);
+  background: rgba(128, 164, 255, 0.07);
+  text-transform: uppercase;
+}
+
+.terminal-pane__history-divider span {
+  color: #748095;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.terminal-pane__history-divider strong {
+  color: #a7bbff;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+}
+
 .terminal-pane::after,
 .browser-pane::after {
   position: absolute;
@@ -787,6 +881,12 @@ input:focus-visible {
 .terminal-pane__host .xterm,
 .terminal-pane__host .xterm-viewport {
   height: 100%;
+}
+
+@media (max-height: 720px) {
+  .terminal-pane--with-history {
+    grid-template-rows: 35px 112px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 1080px) {

@@ -5,6 +5,7 @@ export type TerminalPaneModel = {
   kind: "terminal";
   title: string;
   terminalSettings?: TerminalPaneSettings;
+  historySnapshot?: string;
   restored?: boolean;
 };
 

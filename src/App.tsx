@@ -39,6 +39,7 @@ export default function App({ settings }: AppProps) {
     () => initialState.activeWorkspaceId,
   );
   const [attention, setAttention] = useState<Record<string, string>>({});
+  const [historySnapshotByPane, setHistorySnapshotByPane] = useState<Record<string, string>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [activePaneByWorkspace, setActivePaneByWorkspace] = useState<Record<string, string>>(
     () => initialState.activePaneByWorkspace,
@@ -74,10 +75,24 @@ export default function App({ settings }: AppProps) {
   }, [activeWorkspaceId]);
 
   useEffect(() => {
+    const persistedWorkspaces = workspaces.map((workspace) => ({
+      ...workspace,
+      panes: workspace.panes.map((pane) => {
+        if (pane.kind !== "terminal") return pane;
+        const historySnapshot = Object.prototype.hasOwnProperty.call(
+          historySnapshotByPane,
+          pane.id,
+        )
+          ? historySnapshotByPane[pane.id]
+          : pane.historySnapshot;
+        return { ...pane, historySnapshot };
+      }),
+    }));
+
     saveWorkspaceState(
       {
         version: WORKSPACE_STATE_VERSION,
-        workspaces,
+        workspaces: persistedWorkspaces,
         activeWorkspaceId,
         activePaneByWorkspace,
         splitRatioByWorkspace,
@@ -87,10 +102,18 @@ export default function App({ settings }: AppProps) {
   }, [
     activePaneByWorkspace,
     activeWorkspaceId,
+    historySnapshotByPane,
     settings.persistence.restoreWorkspaces,
+    settings.persistence.terminalHistoryLines,
     splitRatioByWorkspace,
     workspaces,
   ]);
+
+  useEffect(() => {
+    if (settings.persistence.terminalHistoryLines === 0) {
+      setHistorySnapshotByPane({});
+    }
+  }, [settings.persistence.terminalHistoryLines]);
 
   useEffect(() => {
     setActivePaneByWorkspace((current) => {
@@ -161,6 +184,12 @@ export default function App({ settings }: AppProps) {
   }, [activeWorkspace]);
 
   const closePane = useCallback((paneId: string) => {
+    setHistorySnapshotByPane((current) => {
+      if (!Object.prototype.hasOwnProperty.call(current, paneId)) return current;
+      const next = { ...current };
+      delete next[paneId];
+      return next;
+    });
     setAttention((current) => {
       const next = { ...current };
       delete next[paneId];
@@ -192,6 +221,17 @@ export default function App({ settings }: AppProps) {
         for (const pane of target.panes) delete next[pane.id];
         return next;
       });
+      setHistorySnapshotByPane((currentHistory) => {
+        const next = { ...currentHistory };
+        let changed = false;
+        for (const pane of target.panes) {
+          if (Object.prototype.hasOwnProperty.call(next, pane.id)) {
+            delete next[pane.id];
+            changed = true;
+          }
+        }
+        return changed ? next : currentHistory;
+      });
 
       const remaining = current.filter((workspace) => workspace.id !== workspaceId);
       const nextWorkspaces = remaining.length ? remaining : [createWorkspace(settings, "Main")];
@@ -205,6 +245,20 @@ export default function App({ settings }: AppProps) {
       return nextWorkspaces;
     });
   }, [settings]);
+
+  const handleHistoryChange = useCallback((sessionId: string, history: string) => {
+    setHistorySnapshotByPane((current) => {
+      if (!history) {
+        if (!Object.prototype.hasOwnProperty.call(current, sessionId)) return current;
+        const next = { ...current };
+        delete next[sessionId];
+        return next;
+      }
+      return current[sessionId] === history
+        ? current
+        : { ...current, [sessionId]: history };
+    });
+  }, []);
 
   const handleAttention = useCallback((sessionId: string, message: string) => {
     setAttention((current) => ({ ...current, [sessionId]: message }));
@@ -466,9 +520,16 @@ export default function App({ settings }: AppProps) {
                         cwd={workspace.cwd}
                         paneSettings={pane.terminalSettings}
                         restored={pane.restored}
+                        restoredHistory={pane.restored ? pane.historySnapshot : undefined}
+                        historyLineLimit={
+                          settings.persistence.restoreWorkspaces
+                            ? settings.persistence.terminalHistoryLines
+                            : 0
+                        }
                         attention={Boolean(attention[pane.id])}
                         focused={focused}
                         onFocus={focusPane}
+                        onHistoryChange={handleHistoryChange}
                         onAttention={handleAttention}
                         onTitleChange={handleTitleChange}
                         onClose={closePane}
