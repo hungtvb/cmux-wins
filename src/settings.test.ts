@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SETTINGS,
+  LEGACY_SETTINGS_STORAGE_KEYS,
+  SETTINGS_STORAGE_KEY,
   SETTINGS_VERSION,
   exportSettings,
   importSettings,
+  loadSettings,
   normalizeSettings,
   normalizeTerminalPaneSettings,
+  saveSettings,
   snapshotTerminalSettings,
   validateSettings,
 } from "./settings";
@@ -47,6 +51,32 @@ describe("settings schema", () => {
         scrollback: 100_000,
       },
     });
+  });
+
+  it("migrates the v1 settings key and persists workspace restore preferences", () => {
+    const values = new Map<string, string>([
+      [
+        LEGACY_SETTINGS_STORAGE_KEYS[0],
+        JSON.stringify({
+          version: 1,
+          defaultShellProfileId: "wsl",
+          persistence: { restoreWorkspaces: false },
+        }),
+      ],
+    ]);
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+      removeItem: (key: string) => void values.delete(key),
+    };
+
+    const loaded = loadSettings(storage);
+    expect(loaded.defaultShellProfileId).toBe("wsl");
+    expect(loaded.persistence.restoreWorkspaces).toBe(false);
+
+    saveSettings(loaded, storage);
+    expect(values.has(SETTINGS_STORAGE_KEY)).toBe(true);
+    expect(values.has(LEGACY_SETTINGS_STORAGE_KEYS[0])).toBe(false);
   });
 
   it("snapshots terminal settings without retaining mutable references", () => {

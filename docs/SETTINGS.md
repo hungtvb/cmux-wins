@@ -3,10 +3,10 @@
 TonyMux stores a versioned, local settings document under:
 
 ```text
-localStorage["tonymux.settings.v1"]
+localStorage["tonymux.settings.v2"]
 ```
 
-The document contains no credentials, automation token or shell executable path.
+The document contains no credentials, automation token or shell executable path. Version 1 settings are migrated automatically and removed after the next successful save.
 
 ## Shell profiles
 
@@ -38,6 +38,14 @@ Settings are snapshotted when a terminal pane is created:
 Saving settings never restarts an existing PTY. Manual and automation-created terminal panes use the current snapshot when they are created.
 
 The startup command is bounded to 4 KiB, must be a single line and cannot contain NUL bytes. Rust validates the profile ID and startup command again before spawning the shell.
+
+## Workspace restore
+
+Settings version 2 adds `persistence.restoreWorkspaces`. When enabled, TonyMux restores bounded workspace and pane metadata from a previous launch. Restored terminals always start a new PTY and show a `Restored · new shell` label.
+
+The Settings dialog can clear saved workspace state without deleting application settings or closing current panes. Disabling restore removes workspace generations and prevents further writes until the option is enabled again.
+
+See [`SESSION-PERSISTENCE.md`](SESSION-PERSISTENCE.md) for the envelope, migration and recovery contract.
 
 ## Import and export
 

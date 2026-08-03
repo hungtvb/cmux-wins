@@ -3,13 +3,19 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { loadSettings, snapshotTerminalSettings, type TerminalPaneSettings } from "../settings";
+import {
+  loadSettings,
+  normalizeTerminalPaneSettings,
+  snapshotTerminalSettings,
+  type TerminalPaneSettings,
+} from "../settings";
 import type { TerminalOutputEvent } from "../types";
 
 type UseTerminalSessionOptions = {
   workspaceId: string;
   sessionId: string;
   cwd: string;
+  paneSettings?: TerminalPaneSettings;
   onAttention: (message: string) => void;
   onTitleChange: (title: string) => void;
 };
@@ -20,13 +26,17 @@ export function useTerminalSession({
   workspaceId,
   sessionId,
   cwd,
+  paneSettings: providedPaneSettings,
   onAttention,
   onTitleChange,
 }: UseTerminalSessionOptions) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const paneSettingsRef = useRef<TerminalPaneSettings | null>(null);
   if (paneSettingsRef.current === null) {
-    paneSettingsRef.current = snapshotTerminalSettings(loadSettings(), cwd);
+    const currentSettings = loadSettings();
+    paneSettingsRef.current = providedPaneSettings
+      ? normalizeTerminalPaneSettings(providedPaneSettings, currentSettings)
+      : snapshotTerminalSettings(currentSettings, cwd);
   }
   const paneSettings = paneSettingsRef.current;
 

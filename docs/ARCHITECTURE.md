@@ -39,6 +39,14 @@ powershell.exe / pwsh.exe / configured shell
 
 Each terminal pane owns a stable UUID. The frontend sends that UUID with spawn, input, resize, and close commands. Rust stores the matching PTY master, writer, and child process in a mutex-protected registry. Output is streamed back through a single `terminal-output` event and filtered by session ID in the frontend.
 
+## Workspace persistence model
+
+Workspace persistence is a frontend metadata concern and remains separate from the Rust PTY registry. `tonymux.workspaces.v3` stores bounded workspace, pane, focus, split and launch-profile data; `tonymux.workspaces.v3.previous` is the previous known-good generation used for corruption recovery.
+
+On launch, restored terminal panes receive their persisted allowlisted profile snapshot but always invoke Rust to create a new PTY and process. Process IDs, PTY handles, terminal output, automation credentials and browser session data are never serialized into the workspace envelope. Legacy `cmux-wins.workspaces.v1/v2` arrays migrate through the same normalization boundary.
+
+See [`SESSION-PERSISTENCE.md`](SESSION-PERSISTENCE.md).
+
 ## Agent attention protocol
 
 The first MVP recognizes OSC notifications commonly emitted by terminal tools:
@@ -81,7 +89,8 @@ Detection currently happens in the frontend output stream. A later hardening tas
 
 ### Phase 4 — production hardening
 
-- Session restore and bounded scrollback persistence
+- Versioned workspace restore and corruption recovery (metadata slice implemented)
+- Bounded terminal scrollback capture and restored-history rendering
 - Settings and shortcut editor
 - Auto-update and signing
 - Crash recovery

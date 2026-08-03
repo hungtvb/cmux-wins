@@ -1,5 +1,6 @@
-export const SETTINGS_VERSION = 1;
-export const SETTINGS_STORAGE_KEY = "tonymux.settings.v1";
+export const SETTINGS_VERSION = 2;
+export const SETTINGS_STORAGE_KEY = "tonymux.settings.v2";
+export const LEGACY_SETTINGS_STORAGE_KEYS = ["tonymux.settings.v1"] as const;
 
 export const SHELL_PROFILES = [
   {
@@ -40,12 +41,17 @@ export type TerminalAppearance = {
   scrollback: number;
 };
 
+export type WorkspacePersistenceSettings = {
+  restoreWorkspaces: boolean;
+};
+
 export type AppSettings = {
   version: typeof SETTINGS_VERSION;
   defaultShellProfileId: ShellProfileId;
   defaultWorkingDirectory: string;
   startupCommand: string;
   terminal: TerminalAppearance;
+  persistence: WorkspacePersistenceSettings;
 };
 
 export type TerminalPaneSettings = {
@@ -67,6 +73,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
     cursorStyle: "bar",
     cursorBlink: true,
     scrollback: 10_000,
+  },
+  persistence: {
+    restoreWorkspaces: true,
   },
 };
 
@@ -141,12 +150,23 @@ export function normalizeSettings(value: unknown): AppSettings {
   const rawWorkingDirectory =
     candidate.defaultWorkingDirectory ?? candidate.workingDirectory;
 
+  const persistence =
+    candidate.persistence && typeof candidate.persistence === "object"
+      ? (candidate.persistence as Record<string, unknown>)
+      : {};
+
   return {
     version: SETTINGS_VERSION,
     defaultShellProfileId,
     defaultWorkingDirectory: safeString(rawWorkingDirectory, "", 1_024).trim(),
     startupCommand: safeString(candidate.startupCommand, "", 4_096).trim(),
     terminal: normalizeTerminalAppearance(candidate.terminal),
+    persistence: {
+      restoreWorkspaces:
+        typeof persistence.restoreWorkspaces === "boolean"
+          ? persistence.restoreWorkspaces
+          : DEFAULT_SETTINGS.persistence.restoreWorkspaces,
+    },
   };
 }
 
@@ -209,22 +229,32 @@ export function validateSettings(settings: AppSettings): string[] {
   return errors;
 }
 
+function cloneDefaultSettings(): AppSettings {
+  return {
+    ...DEFAULT_SETTINGS,
+    terminal: { ...DEFAULT_SETTINGS.terminal },
+    persistence: { ...DEFAULT_SETTINGS.persistence },
+  };
+}
+
 export function loadSettings(storage: Pick<Storage, "getItem"> = localStorage): AppSettings {
   try {
-    const raw = storage.getItem(SETTINGS_STORAGE_KEY);
-    return raw
-      ? normalizeSettings(JSON.parse(raw))
-      : { ...DEFAULT_SETTINGS, terminal: { ...DEFAULT_SETTINGS.terminal } };
+    const raw =
+      storage.getItem(SETTINGS_STORAGE_KEY) ??
+      LEGACY_SETTINGS_STORAGE_KEYS.map((key) => storage.getItem(key)).find(Boolean) ??
+      null;
+    return raw ? normalizeSettings(JSON.parse(raw)) : cloneDefaultSettings();
   } catch {
-    return { ...DEFAULT_SETTINGS, terminal: { ...DEFAULT_SETTINGS.terminal } };
+    return cloneDefaultSettings();
   }
 }
 
 export function saveSettings(
   settings: AppSettings,
-  storage: Pick<Storage, "setItem"> = localStorage,
+  storage: Pick<Storage, "setItem" | "removeItem"> = localStorage,
 ): void {
   storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalizeSettings(settings)));
+  for (const key of LEGACY_SETTINGS_STORAGE_KEYS) storage.removeItem(key);
 }
 
 export function importSettings(raw: string): AppSettings {

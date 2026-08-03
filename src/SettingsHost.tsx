@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import App from "./App";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { loadSettings, saveSettings, type AppSettings } from "./settings";
+import { clearWorkspaceState } from "./workspacePersistence";
 
 export const OPEN_SETTINGS_EVENT = "tonymux-open-settings";
 
@@ -31,13 +32,18 @@ export default function SettingsHost() {
     setSettings(nextSettings);
   }, []);
 
+  const handleClearWorkspaceState = useCallback(() => {
+    clearWorkspaceState();
+  }, []);
+
   return (
     <>
-      <App />
+      <App settings={settings} />
       <SettingsDialog
         open={open}
         settings={settings}
         onSave={handleSave}
+        onClearWorkspaceState={handleClearWorkspaceState}
         onClose={() => setOpen(false)}
       />
     </>

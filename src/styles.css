@@ -836,3 +836,17 @@ input:focus-visible {
     animation-iteration-count: 1 !important;
   }
 }
+
+.pane-restore-label {
+  overflow: hidden;
+  max-width: 148px;
+  padding: 2px 6px;
+  border: 1px solid rgba(128, 164, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(128, 164, 255, 0.08);
+  color: #9cb8ff;
+  font-size: 9px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

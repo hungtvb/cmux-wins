@@ -6,7 +6,7 @@ TonyMux is a platform port and independent Windows implementation, not a direct 
 
 ## Current capabilities
 
-- Persistent vertical workspaces
+- Versioned workspace persistence with previous-generation recovery
 - Multiple ConPTY terminal panes
 - Native WebView2 browser panes
 - Git branch, dirty state, pull request and listening-port metadata
@@ -44,7 +44,7 @@ The GitHub repository keeps its current name until the stacked PR chain is resol
 ```powershell
 git clone https://github.com/hungtvb/cmux-wins.git
 cd cmux-wins
-git switch feat/tonymux-settings
+git switch feat/session-persistence
 npm install
 npm run tauri dev
 ```
@@ -73,7 +73,7 @@ npm run tauri dev
 
 Settings are versioned, importable and exportable. Shell executable selection is validated again in Rust and limited to Windows PowerShell, PowerShell 7, Command Prompt and WSL. Changes apply to new terminal panes without restarting existing sessions.
 
-See [`docs/SETTINGS.md`](docs/SETTINGS.md).
+See [`docs/SETTINGS.md`](docs/SETTINGS.md) and [`docs/SESSION-PERSISTENCE.md`](docs/SESSION-PERSISTENCE.md).
 
 ## Build and verify
 
@@ -121,7 +121,7 @@ Use the new command name:
 To preserve upgrades, existing workspaces and automation clients, these internal identifiers intentionally remain unchanged for now:
 
 - Tauri application identifier: `com.hungtvb.cmuxwins`
-- Workspace localStorage keys: `cmux-wins.workspaces.*`
+- Legacy workspace localStorage keys: `cmux-wins.workspaces.*` migrate into `tonymux.workspaces.v3`
 - Automation config: `%LOCALAPPDATA%\cmux-windows\automation-v1.json`
 - Named pipe prefix: `cmux-windows-v1-*`
 - Shell override: `CMUX_SHELL`

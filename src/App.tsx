@@ -9,75 +9,43 @@ import { WorkspaceTopbar } from "./components/WorkspaceTopbar";
 import { useAutomationBridge } from "./hooks/useAutomationBridge";
 import { useAutomationEventPublisher } from "./hooks/useAutomationEventPublisher";
 import { useWorkspaceMetadata } from "./hooks/useWorkspaceMetadata";
+import type { AppSettings } from "./settings";
 import type { Pane, Workspace } from "./types";
+import {
+  WORKSPACE_STATE_VERSION,
+  createBrowserPane,
+  createTerminalPane,
+  createWorkspace,
+  loadWorkspaceState,
+  saveWorkspaceState,
+  type WorkspaceState,
+} from "./workspacePersistence";
 
-const STORAGE_KEY = "cmux-wins.workspaces.v2";
-const LEGACY_STORAGE_KEY = "cmux-wins.workspaces.v1";
-const DEFAULT_BROWSER_URL = "https://github.com";
+type AppProps = {
+  settings: AppSettings;
+};
 
-function createTerminalPane(title = "PowerShell"): Pane {
-  return { id: crypto.randomUUID(), kind: "terminal", title };
-}
-
-function createBrowserPane(url = DEFAULT_BROWSER_URL): Pane {
-  return { id: crypto.randomUUID(), kind: "browser", title: "Browser", url };
-}
-
-function createWorkspace(title = "Workspace", cwd = ""): Workspace {
-  return {
-    id: crypto.randomUUID(),
-    title,
-    cwd,
-    panes: [createTerminalPane()],
-    unread: false,
-  };
-}
-
-function migratePane(value: unknown): Pane {
-  const pane = value as Partial<Pane> & { url?: unknown };
-  if (pane?.kind === "browser") {
-    return {
-      id: crypto.randomUUID(),
-      kind: "browser",
-      title: typeof pane.title === "string" ? pane.title : "Browser",
-      url: typeof pane.url === "string" && pane.url ? pane.url : DEFAULT_BROWSER_URL,
-    };
+export default function App({ settings }: AppProps) {
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const initialStateRef = useRef<WorkspaceState | null>(null);
+  if (initialStateRef.current === null) {
+    initialStateRef.current = loadWorkspaceState(settings).state;
   }
+  const initialState = initialStateRef.current;
 
-  return {
-    id: crypto.randomUUID(),
-    kind: "terminal",
-    title: typeof pane?.title === "string" ? pane.title : "PowerShell",
-  };
-}
-
-function loadWorkspaces(): Workspace[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return [createWorkspace("Main")];
-
-    const parsed = JSON.parse(raw) as Workspace[];
-    if (!Array.isArray(parsed) || parsed.length === 0) return [createWorkspace("Main")];
-
-    return parsed.map((workspace) => ({
-      id: typeof workspace.id === "string" ? workspace.id : crypto.randomUUID(),
-      title: typeof workspace.title === "string" ? workspace.title : "Workspace",
-      cwd: typeof workspace.cwd === "string" ? workspace.cwd : "",
-      unread: false,
-      panes: workspace.panes?.length ? workspace.panes.map(migratePane) : [createTerminalPane()],
-    }));
-  } catch {
-    return [createWorkspace("Main")];
-  }
-}
-
-export default function App() {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(loadWorkspaces);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState(() => workspaces[0].id);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(() => initialState.workspaces);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(
+    () => initialState.activeWorkspaceId,
+  );
   const [attention, setAttention] = useState<Record<string, string>>({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activePaneByWorkspace, setActivePaneByWorkspace] = useState<Record<string, string>>({});
-  const [splitRatioByWorkspace, setSplitRatioByWorkspace] = useState<Record<string, number>>({});
+  const [activePaneByWorkspace, setActivePaneByWorkspace] = useState<Record<string, string>>(
+    () => initialState.activePaneByWorkspace,
+  );
+  const [splitRatioByWorkspace, setSplitRatioByWorkspace] = useState<Record<string, number>>(
+    () => initialState.splitRatioByWorkspace,
+  );
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const metadataByWorkspace = useWorkspaceMetadata(workspaces, activeWorkspaceId);
@@ -106,9 +74,23 @@ export default function App() {
   }, [activeWorkspaceId]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaces));
-    localStorage.removeItem(LEGACY_STORAGE_KEY);
-  }, [workspaces]);
+    saveWorkspaceState(
+      {
+        version: WORKSPACE_STATE_VERSION,
+        workspaces,
+        activeWorkspaceId,
+        activePaneByWorkspace,
+        splitRatioByWorkspace,
+      },
+      settingsRef.current,
+    );
+  }, [
+    activePaneByWorkspace,
+    activeWorkspaceId,
+    settings.persistence.restoreWorkspaces,
+    splitRatioByWorkspace,
+    workspaces,
+  ]);
 
   useEffect(() => {
     setActivePaneByWorkspace((current) => {
@@ -144,16 +126,16 @@ export default function App() {
     if (!title) return;
 
     const cwd = window.prompt("Working directory (optional)", "")?.trim() ?? "";
-    const workspace = createWorkspace(title, cwd);
+    const workspace = createWorkspace(settings, title, cwd);
     activeWorkspaceIdRef.current = workspace.id;
     setWorkspaces((current) => [...current, workspace]);
     setActiveWorkspaceId(workspace.id);
-  }, [workspaces.length]);
+  }, [settings, workspaces.length]);
 
   const splitTerminalPane = useCallback(() => {
     if (!activeWorkspace) return;
 
-    const pane = createTerminalPane();
+    const pane = createTerminalPane(settings, activeWorkspace.cwd);
     setWorkspaces((current) =>
       current.map((workspace) =>
         workspace.id === activeWorkspace.id
@@ -162,7 +144,7 @@ export default function App() {
       ),
     );
     setActivePaneByWorkspace((current) => ({ ...current, [activeWorkspace.id]: pane.id }));
-  }, [activeWorkspace]);
+  }, [activeWorkspace, settings]);
 
   const addBrowserPane = useCallback(() => {
     if (!activeWorkspace) return;
@@ -190,10 +172,15 @@ export default function App() {
       current.map((workspace) => {
         if (!workspace.panes.some((pane) => pane.id === paneId)) return workspace;
         const remaining = workspace.panes.filter((pane) => pane.id !== paneId);
-        return { ...workspace, panes: remaining.length ? remaining : [createTerminalPane()] };
+        return {
+          ...workspace,
+          panes: remaining.length
+            ? remaining
+            : [createTerminalPane(settings, workspace.cwd)],
+        };
       }),
     );
-  }, []);
+  }, [settings]);
 
   const closeWorkspace = useCallback((workspaceId: string) => {
     setWorkspaces((current) => {
@@ -207,7 +194,7 @@ export default function App() {
       });
 
       const remaining = current.filter((workspace) => workspace.id !== workspaceId);
-      const nextWorkspaces = remaining.length ? remaining : [createWorkspace("Main")];
+      const nextWorkspaces = remaining.length ? remaining : [createWorkspace(settings, "Main")];
 
       if (activeWorkspaceIdRef.current === workspaceId) {
         const nextActive = nextWorkspaces[0].id;
@@ -217,7 +204,7 @@ export default function App() {
 
       return nextWorkspaces;
     });
-  }, []);
+  }, [settings]);
 
   const handleAttention = useCallback((sessionId: string, message: string) => {
     setAttention((current) => ({ ...current, [sessionId]: message }));
@@ -477,6 +464,8 @@ export default function App() {
                         sessionId={pane.id}
                         title={pane.title}
                         cwd={workspace.cwd}
+                        paneSettings={pane.terminalSettings}
+                        restored={pane.restored}
                         attention={Boolean(attention[pane.id])}
                         focused={focused}
                         onFocus={focusPane}
