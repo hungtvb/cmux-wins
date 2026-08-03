@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { filterCommandPaletteItems, type CommandPaletteItem } from "./commandPalette";
+import { filterCommandPaletteItems, type CommandPaletteItem } from "./commandPaletteModel";
 
 const noop = vi.fn();
 const items: CommandPaletteItem[] = [
