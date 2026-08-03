@@ -1,0 +1,48 @@
+name: ChatGPT Dependency Export
+
+on:
+  pull_request:
+    branches:
+      - feat/trusted-custom-shells
+    paths:
+      - .github/workflows/chatgpt-dependency-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export-node-modules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact PR base
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Package dependency tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf "$RUNNER_TEMP/tonymux-node-modules.tar.gz" node_modules
+          sha256sum "$RUNNER_TEMP/tonymux-node-modules.tar.gz" > "$RUNNER_TEMP/tonymux-node-modules.tar.gz.sha256"
+
+      - name: Upload dependency tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: tonymux-node-modules-node22
+          path: |
+            ${{ runner.temp }}/tonymux-node-modules.tar.gz
+            ${{ runner.temp }}/tonymux-node-modules.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
