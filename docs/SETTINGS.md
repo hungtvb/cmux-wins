@@ -3,10 +3,10 @@
 TonyMux stores a versioned, local settings document under:
 
 ```text
-localStorage["tonymux.settings.v3"]
+localStorage["tonymux.settings.v4"]
 ```
 
-Version 2 and version 1 settings are migrated automatically and removed after the next successful save. The settings document contains no credentials, automation token or shell executable path.
+Versions 3, 2 and 1 are migrated automatically and removed after the next successful save. The settings document contains no credentials, automation token or shell executable path.
 
 ## Shell profiles
 
@@ -39,9 +39,27 @@ Saving settings never restarts an existing PTY. Manual and automation-created te
 
 The startup command is bounded to 4 KiB, must be a single line and cannot contain NUL bytes. Rust validates the profile ID and startup command again before spawning the shell.
 
+## Keyboard shortcuts
+
+Settings version 4 stores a conflict-free map of stable action IDs to canonical chords such as `Ctrl+Shift+KeyB`. The recorder uses `KeyboardEvent.code`, so a binding follows the physical key position rather than a locale-sensitive character.
+
+The editable actions cover:
+
+- Settings and command palette;
+- new/close workspace;
+- split terminal and open browser pane;
+- sidebar visibility;
+- workspace slots 1 through 9.
+
+A global chord must include Ctrl or Alt. Shift can be added, but bare printable keys, modifier-only presses, the Windows key, `Alt+F4` and `Ctrl+Alt+Delete` are rejected. An action can be explicitly unassigned; visible toolbar/menu controls and the command palette remain available.
+
+The Settings recorder names an existing action immediately when a duplicate is attempted. Validation repeats the conflict check during save and import. If persisted storage is externally modified to contain duplicates, TonyMux keeps unrelated settings and restores the shortcut map to safe defaults.
+
+Global shortcuts are ignored while users type in form fields, selects or contenteditable surfaces and while IME composition is active. The xterm helper textarea is intentionally exempt so TonyMux shortcuts still work while the terminal has focus. App-level shortcuts are suspended while the Settings dialog is open so recorder input cannot trigger background actions.
+
 ## Workspace restore
 
-Settings version 3 contains:
+Settings version 4 contains:
 
 ```text
 persistence.restoreWorkspaces
@@ -71,8 +89,9 @@ Exported settings intentionally exclude automation tokens, named-pipe details, w
 
 ## Keyboard access
 
-- `Ctrl+,` opens Settings.
+- The configured Settings shortcut opens the dialog; the visible **Settings** menu action remains available when unassigned.
 - `Escape` closes the dialog.
 - Tab focus is trapped inside the modal while it is open.
+- Shortcut recording and conflict messages use status/alert live regions.
 - Form errors use an alert region.
 - The restored-history text block is keyboard-focusable so long content can be scrolled without a pointer.

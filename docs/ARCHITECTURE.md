@@ -93,11 +93,16 @@ Detection currently happens in the frontend output stream. A later hardening tas
 
 - Versioned workspace restore and corruption recovery (metadata slice implemented)
 - Bounded inert terminal-history capture and restored-history rendering (implemented)
-- Settings and shortcut editor
+- Versioned Settings v4 and conflict-safe shortcut editor (implemented)
 - Auto-update and signing
 - Crash recovery
 - PTY integration tests
 - Accessibility and IME regression suite
+
+
+### Shortcut dispatch boundary
+
+Shortcut configuration is data-only: stable action IDs map to canonical `KeyboardEvent.code` chords. The settings document cannot introduce commands or executable callbacks. Runtime dispatch is an allowlisted action table in React, with duplicate validation, modifier requirements, IME/repeat guards and editable-target suppression. Settings remains reachable through a visible menu even when its chord is unassigned.
 
 ## Known risks
 

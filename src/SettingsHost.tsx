@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import App from "./App";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { loadSettings, saveSettings, type AppSettings } from "./settings";
+import { OPEN_SETTINGS_EVENT } from "./settingsEvents";
+import { isEditableShortcutTarget, shortcutMatchesEvent } from "./shortcuts";
 import { clearWorkspaceState } from "./workspacePersistence";
 
-export const OPEN_SETTINGS_EVENT = "tonymux-open-settings";
+export { OPEN_SETTINGS_EVENT } from "./settingsEvents";
 
 export default function SettingsHost() {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
@@ -13,10 +15,15 @@ export default function SettingsHost() {
   useEffect(() => {
     const openSettings = () => setOpen(true);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.ctrlKey && !event.altKey && !event.shiftKey && event.key === ",") {
-        event.preventDefault();
-        setOpen(true);
+      if (
+        open ||
+        isEditableShortcutTarget(event.target) ||
+        !shortcutMatchesEvent(settings.shortcuts["settings.open"], event)
+      ) {
+        return;
       }
+      event.preventDefault();
+      setOpen(true);
     };
 
     window.addEventListener(OPEN_SETTINGS_EVENT, openSettings);
@@ -25,7 +32,7 @@ export default function SettingsHost() {
       window.removeEventListener(OPEN_SETTINGS_EVENT, openSettings);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, []);
+  }, [open, settings.shortcuts]);
 
   const handleSave = useCallback((nextSettings: AppSettings) => {
     saveSettings(nextSettings);
@@ -38,7 +45,7 @@ export default function SettingsHost() {
 
   return (
     <>
-      <App settings={settings} />
+      <App settings={settings} keyboardShortcutsEnabled={!open} />
       <SettingsDialog
         open={open}
         settings={settings}
