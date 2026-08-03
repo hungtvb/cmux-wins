@@ -1,7 +1,11 @@
+import type { TerminalPaneSettings } from "./settings";
+
 export type TerminalPaneModel = {
   id: string;
   kind: "terminal";
   title: string;
+  terminalSettings?: TerminalPaneSettings;
+  restored?: boolean;
 };
 
 export type BrowserPaneModel = {

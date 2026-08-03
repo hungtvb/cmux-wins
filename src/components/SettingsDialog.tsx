@@ -1,8 +1,10 @@
 import {
+  Database,
   Download,
   RotateCcw,
   Settings2,
   TerminalSquare,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -31,6 +33,7 @@ type SettingsDialogProps = {
   open: boolean;
   settings: AppSettings;
   onSave: (settings: AppSettings) => void;
+  onClearWorkspaceState: () => void;
   onClose: () => void;
 };
 
@@ -38,6 +41,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
     terminal: { ...settings.terminal },
+    persistence: { ...settings.persistence },
   };
 }
 
@@ -45,6 +49,7 @@ export function SettingsDialog({
   open,
   settings,
   onSave,
+  onClearWorkspaceState,
   onClose,
 }: SettingsDialogProps) {
   const titleId = useId();
@@ -53,11 +58,13 @@ export function SettingsDialog({
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState(() => cloneSettings(settings));
   const [errors, setErrors] = useState<string[]>([]);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setDraft(cloneSettings(settings));
     setErrors([]);
+    setNotice("");
     requestAnimationFrame(() => {
       dialogRef.current
         ?.querySelector<HTMLElement>(
@@ -116,6 +123,16 @@ export function SettingsDialog({
 
   const reset = () => {
     setDraft(cloneSettings(DEFAULT_SETTINGS));
+    setErrors([]);
+    setNotice("");
+  };
+
+  const clearSavedWorkspaceState = () => {
+    if (!window.confirm("Clear saved TonyMux workspace state? Current panes will remain open.")) {
+      return;
+    }
+    onClearWorkspaceState();
+    setNotice("Saved workspace state cleared. Current panes remain open until you close TonyMux.");
     setErrors([]);
   };
 
@@ -318,6 +335,58 @@ export function SettingsDialog({
               </label>
             </div>
           </section>
+
+          <section className="settings-section" aria-labelledby="settings-persistence-title">
+            <div className="settings-section__heading">
+              <Database size={15} aria-hidden="true" />
+              <div>
+                <h3 id="settings-persistence-title">Workspace restore</h3>
+                <p>Restore saved layout metadata while always starting fresh terminal processes.</p>
+              </div>
+            </div>
+
+            <div className="settings-form-grid">
+              <label className="settings-toggle settings-field--wide">
+                <input
+                  type="checkbox"
+                  checked={draft.persistence.restoreWorkspaces}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDraft((current) => ({
+                      ...current,
+                      persistence: {
+                        ...current.persistence,
+                        restoreWorkspaces: event.target.checked,
+                      },
+                    }))
+                  }
+                />
+                <span>
+                  <strong>Restore workspaces on launch</strong>
+                  <small>Stores pane type, layout, title, directory, browser URL and terminal profile snapshot.</small>
+                </span>
+              </label>
+              <div className="settings-persistence-action settings-field--wide">
+                <div>
+                  <strong>Saved workspace state</strong>
+                  <small>Clearing it does not remove TonyMux settings or close current panes.</small>
+                </div>
+                <button
+                  className="settings-button settings-button--danger"
+                  type="button"
+                  onClick={clearSavedWorkspaceState}
+                >
+                  <Trash2 size={14} />
+                  Clear saved state
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {notice && (
+            <div className="settings-notice" role="status">
+              {notice}
+            </div>
+          )}
 
           {errors.length > 0 && (
             <div className="settings-errors" role="alert">

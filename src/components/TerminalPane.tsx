@@ -1,12 +1,15 @@
 import { BellRing, SquareTerminal, X } from "lucide-react";
 import { memo, useCallback } from "react";
 import { useTerminalSession } from "../hooks/useTerminalSession";
+import type { TerminalPaneSettings } from "../settings";
 
 type TerminalPaneProps = {
   workspaceId: string;
   sessionId: string;
   title: string;
   cwd: string;
+  paneSettings?: TerminalPaneSettings;
+  restored?: boolean;
   attention: boolean;
   focused: boolean;
   onFocus: () => void;
@@ -20,6 +23,8 @@ function TerminalPaneComponent({
   sessionId,
   title,
   cwd,
+  paneSettings,
+  restored,
   attention,
   focused,
   onFocus,
@@ -39,6 +44,7 @@ function TerminalPaneComponent({
     workspaceId,
     sessionId,
     cwd,
+    paneSettings,
     onAttention: handleAttention,
     onTitleChange: handleTitleChange,
   });
@@ -57,6 +63,7 @@ function TerminalPaneComponent({
             <SquareTerminal size={13} aria-hidden="true" />
           )}
           <span>{title}</span>
+          {restored && <span className="pane-restore-label">Restored · new shell</span>}
           {focused && <span className="pane-focus-label">Active</span>}
         </div>
         <button
