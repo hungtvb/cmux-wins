@@ -2,6 +2,7 @@ pub mod automation;
 mod browser;
 mod terminal;
 mod terminal_automation;
+mod trusted_shells;
 mod workspace_metadata;
 
 use automation::{
@@ -18,11 +19,15 @@ use terminal::{
     close_terminal, get_workspace_metadata_batch, resize_terminal, spawn_terminal, write_terminal,
     AppState,
 };
+use trusted_shells::{
+    is_shell_executable_trusted, trust_shell_executable, TrustedShellStore,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .manage(TrustedShellStore::default())
         .manage(AutomationBridge::default())
         .manage(AutomationEventStore::default())
         .setup(|app| {
@@ -46,7 +51,9 @@ pub fn run() {
             get_workspace_metadata_batch,
             set_automation_frontend_ready,
             resolve_automation_request,
-            publish_main_frontend_automation_events
+            publish_main_frontend_automation_events,
+            trust_shell_executable,
+            is_shell_executable_trusted
         ])
         .run(tauri::generate_context!())
         .expect("error while running TonyMux");

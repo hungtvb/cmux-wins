@@ -7,30 +7,30 @@ TonyMux restores bounded workspace presentation state, not operating-system proc
 The current workspace envelope is stored at:
 
 ```text
-localStorage["tonymux.workspaces.v4"]
+localStorage["tonymux.workspaces.v5"]
 ```
 
 Before replacing a valid current envelope, TonyMux normalizes it with the current retention settings and stores that known-good generation at:
 
 ```text
-localStorage["tonymux.workspaces.v4.previous"]
+localStorage["tonymux.workspaces.v5.previous"]
 ```
 
 If the current value is malformed or cannot produce a valid workspace, TonyMux attempts the previous generation. Oversized history is truncated while valid workspace metadata is retained. If neither generation is usable, it starts with a clean `Main` workspace. Settings remain independent and are never removed by workspace recovery.
 
 ## Persisted metadata
 
-Version 4 stores only bounded presentation and launch metadata:
+Version 5 stores only bounded presentation and launch metadata:
 
 - workspace ID, title and working directory;
 - pane ID, type and title;
 - active workspace and active pane per workspace;
 - split ratios clamped to 28–72%;
 - browser URLs limited to credential-free HTTP(S) URLs;
-- terminal shell-profile, working-directory, startup-command and appearance snapshots;
+- terminal shell-profile, optional validated custom executable, working-directory, startup-command and appearance snapshots;
 - optional inert terminal-history text.
 
-The envelope does not contain PTY handles, process IDs, automation tokens, named-pipe metadata, browser cookies or repository credentials.
+The envelope does not contain PTY handles, process IDs, automation tokens, named-pipe metadata, browser cookies, repository credentials or custom-executable trust decisions.
 
 ## Terminal-history capture pipeline
 
@@ -68,20 +68,22 @@ The block includes a visible and keyboard-accessible divider:
 Restored history · New shell below
 ```
 
-The stored profile snapshot selects the same Rust-allowlisted shell profile, but TonyMux always calls `spawn_terminal` for a new process. The history block remains immutable for that pane lifetime while new output is captured into the next bounded snapshot.
+The stored profile snapshot selects the same built-in profile or preserves a validated custom executable path, but TonyMux always calls `spawn_terminal` for a new process. Rust revalidates custom paths and denies launch unless the current Windows account previously trusted the normalized executable. The history block remains immutable for that pane lifetime while new output is captured into the next bounded snapshot.
 
 ## Migration
 
 TonyMux accepts the previous workspace formats:
 
 ```text
+localStorage["tonymux.workspaces.v4"]
+localStorage["tonymux.workspaces.v4.previous"]
 localStorage["tonymux.workspaces.v3"]
 localStorage["tonymux.workspaces.v3.previous"]
 localStorage["cmux-wins.workspaces.v2"]
 localStorage["cmux-wins.workspaces.v1"]
 ```
 
-Version 3 metadata migrates cleanly without terminal history. Legacy records are normalized into the v4 envelope and removed after the next successful save. Missing or duplicate IDs are replaced, unsafe URLs fall back to `https://github.com`, and unbounded strings, pane counts and history payloads are truncated to supported limits.
+The v4 keys are also accepted and migrate into v5. Version 3 metadata migrates cleanly without terminal history. Legacy records are normalized into the v5 envelope and removed after the next successful save. Missing or duplicate IDs are replaced, unsafe URLs fall back to `https://github.com`, invalid custom executable snapshots fall back to the current safe terminal settings, and unbounded strings, pane counts and history payloads are truncated to supported limits.
 
 Unknown future envelope versions are rejected instead of being downgraded and overwritten.
 

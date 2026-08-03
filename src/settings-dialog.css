@@ -155,6 +155,115 @@
   font-size: 9px;
 }
 
+.custom-profile-panel {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: rgba(5, 8, 13, 0.42);
+}
+
+.custom-profile-panel__heading,
+.custom-profile__toolbar,
+.custom-profile__trust {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.custom-profile-panel__heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.custom-profile-panel__heading strong {
+  color: var(--text-primary);
+  font-size: 10px;
+}
+
+.custom-profile-panel__heading small,
+.custom-profile-empty,
+.custom-profile-status {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.custom-profile-empty {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 9px;
+}
+
+.custom-profile-list {
+  display: grid;
+  gap: 9px;
+}
+
+.custom-profile {
+  display: grid;
+  gap: 11px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background: var(--surface-1);
+}
+
+.custom-profile--selected {
+  border-color: #6687ea;
+  box-shadow: inset 0 0 0 1px rgba(125, 156, 255, 0.14);
+}
+
+.custom-profile__selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.custom-profile__selector input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.custom-profile__trust {
+  min-height: 32px;
+  padding-top: 2px;
+}
+
+.custom-profile__trusted,
+.custom-profile__untrusted {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.custom-profile__trusted {
+  color: #a9ebc3;
+}
+
+.custom-profile__untrusted,
+.settings-field__error {
+  color: #ffb3c0 !important;
+}
+
+.custom-profile-status {
+  min-height: 14px;
+}
+
 .settings-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -288,6 +397,11 @@
   background: #6687ea;
 }
 
+.settings-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 @media (max-width: 700px) {
   .settings-scrim {
     padding: 12px;
@@ -314,6 +428,13 @@
   .settings-dialog__utility-actions,
   .settings-dialog__primary-actions {
     flex-wrap: wrap;
+  }
+
+  .custom-profile-panel__heading,
+  .custom-profile__toolbar,
+  .custom-profile__trust {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .settings-dialog__primary-actions .settings-button {

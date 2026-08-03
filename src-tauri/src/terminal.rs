@@ -3,6 +3,7 @@ use crate::{
     terminal_automation::{
         TerminalAutomationStore, TerminalLifecycleStatus, TerminalReadResult,
     },
+    trusted_shells::{normalize_custom_executable, TrustedShellStore},
     workspace_metadata::{
         inspect_workspace_metadata_batch, WorkspaceMetadataEntry, WorkspaceMetadataRequest,
     },
@@ -99,12 +100,43 @@ fn shell_for_profile(profile_id: &str) -> Result<&'static str, String> {
     }
 }
 
-fn resolve_shell(profile_id: &str) -> Result<String, String> {
-    let default_shell = shell_for_profile(profile_id)?;
-    Ok(env::var("CMUX_SHELL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| default_shell.to_owned()))
+fn is_custom_profile_id(profile_id: &str) -> bool {
+    let Some(suffix) = profile_id.strip_prefix("custom:") else {
+        return false;
+    };
+    (8..=80).contains(&suffix.len())
+        && suffix
+            .bytes()
+            .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'_' | b'-'))
+}
+
+fn resolve_shell(
+    profile_id: &str,
+    custom_shell_executable: Option<String>,
+    trusted_shells: &TrustedShellStore,
+) -> Result<String, String> {
+    if let Ok(default_shell) = shell_for_profile(profile_id) {
+        if custom_shell_executable.is_some() {
+            return Err("built-in shell profiles cannot include a custom executable".to_owned());
+        }
+        return Ok(env::var("CMUX_SHELL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| default_shell.to_owned()));
+    }
+
+    if !is_custom_profile_id(profile_id) {
+        return Err(format!("unsupported shell profile: {profile_id}"));
+    }
+    let executable = custom_shell_executable
+        .ok_or_else(|| "custom shell profile is missing its executable path".to_owned())?;
+    let executable = normalize_custom_executable(&executable)?;
+    if !trusted_shells.is_trusted(&executable)? {
+        return Err(format!(
+            "custom shell executable is not trusted for this Windows account: {executable}"
+        ));
+    }
+    Ok(executable)
 }
 
 fn validate_startup_command(command: Option<String>) -> Result<Option<String>, String> {
@@ -146,10 +178,12 @@ fn publish_terminal_event(app: &AppHandle, kind: &str, payload: Value) {
 pub(crate) fn spawn_terminal(
     app: AppHandle,
     state: State<'_, AppState>,
+    trusted_shells: State<'_, TrustedShellStore>,
     workspace_id: String,
     session_id: String,
     cwd: Option<String>,
     shell_profile_id: String,
+    custom_shell_executable: Option<String>,
     startup_command: Option<String>,
     cols: u16,
     rows: u16,
@@ -164,7 +198,11 @@ pub(crate) fn spawn_terminal(
         }
     }
 
-    let shell = resolve_shell(&shell_profile_id)?;
+    let shell = resolve_shell(
+        &shell_profile_id,
+        custom_shell_executable,
+        trusted_shells.inner(),
+    )?;
     let startup_command = validate_startup_command(startup_command)?;
 
     let pty_system = native_pty_system();
@@ -479,6 +517,10 @@ pub(crate) async fn get_workspace_metadata_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn shell_profiles_are_allowlisted() {
@@ -487,6 +529,45 @@ mod tests {
         assert_eq!(shell_for_profile("command-prompt").unwrap(), "cmd.exe");
         assert_eq!(shell_for_profile("wsl").unwrap(), "wsl.exe");
         assert!(shell_for_profile("custom.exe").is_err());
+    }
+
+    #[test]
+    fn custom_shells_require_a_stable_profile_id_and_rust_trust() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after Unix epoch")
+            .as_nanos();
+        let path = env::temp_dir().join(format!(
+            "tonymux-terminal-trust-{}-{nonce}.json",
+            std::process::id()
+        ));
+        let store = TrustedShellStore::from_path(path.clone()).expect("store should load");
+
+        assert!(resolve_shell(
+            "custom:trusted_shell",
+            Some(r"C:\Tools\Shell.exe".to_owned()),
+            &store,
+        )
+        .is_err());
+        store
+            .trust(r"C:\Tools\Shell.exe")
+            .expect("trust should persist");
+        assert_eq!(
+            resolve_shell(
+                "custom:trusted_shell",
+                Some(r"c:/tools/Shell.exe".to_owned()),
+                &store,
+            )
+            .unwrap(),
+            r"C:\tools\Shell.exe"
+        );
+        assert!(resolve_shell(
+            "custom:bad/id",
+            Some(r"C:\Tools\Shell.exe".to_owned()),
+            &store,
+        )
+        .is_err());
+        let _ = fs::remove_file(path);
     }
 
     #[test]

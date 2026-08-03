@@ -179,6 +179,7 @@ export function useTerminalSession({
         sessionId,
         cwd: paneSettings.workingDirectory || null,
         shellProfileId: paneSettings.shellProfileId,
+        customShellExecutable: paneSettings.customShellExecutable || null,
         startupCommand: paneSettings.startupCommand || null,
         cols: terminal.cols,
         rows: terminal.rows,

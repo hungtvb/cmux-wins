@@ -12,10 +12,12 @@ import {
 } from "./terminalHistory";
 import type { Pane, Workspace } from "./types";
 
-export const WORKSPACE_STATE_VERSION = 4 as const;
-export const WORKSPACE_STATE_STORAGE_KEY = "tonymux.workspaces.v4";
-export const WORKSPACE_STATE_PREVIOUS_KEY = "tonymux.workspaces.v4.previous";
+export const WORKSPACE_STATE_VERSION = 5 as const;
+export const WORKSPACE_STATE_STORAGE_KEY = "tonymux.workspaces.v5";
+export const WORKSPACE_STATE_PREVIOUS_KEY = "tonymux.workspaces.v5.previous";
 export const LEGACY_WORKSPACE_STORAGE_KEYS = [
+  "tonymux.workspaces.v4",
+  "tonymux.workspaces.v4.previous",
   "tonymux.workspaces.v3",
   "tonymux.workspaces.v3.previous",
   "cmux-wins.workspaces.v2",

@@ -9,10 +9,12 @@ import {
   importSettings,
   loadSettings,
   normalizeSettings,
+  normalizeCustomShellExecutable,
   normalizeTerminalPaneSettings,
   saveSettings,
   snapshotTerminalSettings,
   validateSettings,
+  validateCustomShellExecutable,
 } from "./settings";
 
 describe("settings schema", () => {
@@ -103,6 +105,92 @@ describe("settings schema", () => {
     expect(migrated.shortcuts).toEqual(DEFAULT_SHORTCUT_BINDINGS);
   });
 
+  it("migrates settings v4 to an empty custom shell collection", () => {
+    const migrated = normalizeSettings({
+      version: 4,
+      defaultShellProfileId: "powershell-7",
+      shortcuts: DEFAULT_SHORTCUT_BINDINGS,
+    });
+    expect(migrated.version).toBe(SETTINGS_VERSION);
+    expect(migrated.customShellProfiles).toEqual([]);
+  });
+
+  it("normalizes bounded custom executable profiles and snapshots the selected path", () => {
+    const settings = normalizeSettings({
+      defaultShellProfileId: "custom:my_shell_01",
+      customShellProfiles: [
+        {
+          id: "custom:my_shell_01",
+          label: "  Nushell  ",
+          executable: "c:/Tools/Nushell/nu.exe",
+        },
+      ],
+    });
+
+    expect(settings.customShellProfiles).toEqual([
+      {
+        id: "custom:my_shell_01",
+        label: "Nushell",
+        executable: "C:\\Tools\\Nushell\\nu.exe",
+      },
+    ]);
+    expect(snapshotTerminalSettings(settings)).toMatchObject({
+      shellProfileId: "custom:my_shell_01",
+      customShellExecutable: "C:\\Tools\\Nushell\\nu.exe",
+    });
+  });
+
+  it("rejects unsafe custom executable paths and duplicate executables", () => {
+    expect(validateCustomShellExecutable("shell.exe")).toMatch(/absolute local Windows path/);
+    expect(validateCustomShellExecutable("C:\\Tools\\shell.exe --flag")).toMatch(
+      /cannot include arguments/,
+    );
+    expect(normalizeCustomShellExecutable("%LOCALAPPDATA%\\shell.exe")).toBe("");
+    expect(validateCustomShellExecutable("C:\\Tools\\shell.exe\n")).toMatch(
+      /control characters/,
+    );
+    expect(normalizeCustomShellExecutable("C:\\Tools\\shell.exe\n")).toBe("");
+
+    const errors = validateSettings({
+      ...DEFAULT_SETTINGS,
+      defaultShellProfileId: "custom:profile_one",
+      customShellProfiles: [
+        {
+          id: "custom:profile_one",
+          label: "One",
+          executable: "C:\\Tools\\Shell.exe",
+        },
+        {
+          id: "custom:profile_two",
+          label: "Two",
+          executable: "c:/tools/shell.exe",
+        },
+      ],
+    });
+    expect(errors).toContain("Two uses the same executable as One.");
+  });
+
+  it("falls back when a selected custom profile is missing or malformed", () => {
+    expect(
+      normalizeSettings({
+        defaultShellProfileId: "custom:missing_profile",
+        customShellProfiles: [],
+      }).defaultShellProfileId,
+    ).toBe("windows-powershell");
+    expect(
+      normalizeSettings({
+        defaultShellProfileId: "custom:bad_profile",
+        customShellProfiles: [
+          {
+            id: "custom:bad_profile",
+            label: "Bad",
+            executable: "..\\shell.exe",
+          },
+        ],
+      }).customShellProfiles,
+    ).toEqual([]);
+  });
+
   it("preserves valid custom and explicitly unbound shortcuts", () => {
     const normalized = normalizeSettings({
       shortcuts: {
@@ -176,13 +264,43 @@ describe("settings schema", () => {
     expect(pane.appearance.scrollback).toBe(DEFAULT_SETTINGS.terminal.scrollback);
   });
 
+  it("preserves a valid custom executable in persisted pane snapshots", () => {
+    const pane = normalizeTerminalPaneSettings({
+      shellProfileId: "custom:restored_shell",
+      customShellExecutable: "c:/Tools/Restored/shell.exe",
+      workingDirectory: "C:\\code",
+    });
+    expect(pane).toMatchObject({
+      shellProfileId: "custom:restored_shell",
+      customShellExecutable: "C:\\Tools\\Restored\\shell.exe",
+      workingDirectory: "C:\\code",
+    });
+  });
+
   it("round-trips exported settings without secrets", () => {
     const exported = exportSettings({
       ...DEFAULT_SETTINGS,
-      defaultShellProfileId: "command-prompt",
+      defaultShellProfileId: "custom:export_shell",
+      customShellProfiles: [
+        {
+          id: "custom:export_shell",
+          label: "Export shell",
+          executable: "C:\\Tools\\export.exe",
+        },
+      ],
     });
     expect(exported).not.toContain("token");
-    expect(importSettings(exported).defaultShellProfileId).toBe("command-prompt");
+    expect(exported).not.toContain("trusted");
+    expect(importSettings(exported)).toMatchObject({
+      defaultShellProfileId: "custom:export_shell",
+      customShellProfiles: [
+        {
+          id: "custom:export_shell",
+          label: "Export shell",
+          executable: "C:\\Tools\\export.exe",
+        },
+      ],
+    });
   });
 
   it("rejects multiline paths and startup commands", () => {
