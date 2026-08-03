@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   Search,
+  Settings2,
   Trash2,
 } from "lucide-react";
 import type { MouseEvent } from "react";
@@ -146,11 +147,24 @@ export function WorkspaceTopbar({
             <span className="sr-only">More workspace actions</span>
           </summary>
           <div className="action-menu__popover">
+            <div className="action-menu__label">Application</div>
+            <button
+              className="action-menu__item"
+              type="button"
+              onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                closeActionMenu(event);
+                window.dispatchEvent(new Event("tonymux-open-settings"));
+              }}
+            >
+              <Settings2 size={14} />
+              <span>Settings</span>
+              <kbd>Ctrl ,</kbd>
+            </button>
             <div className="action-menu__label">Workspace</div>
             <button
               className="action-menu__item action-menu__item--danger"
               type="button"
-              onClick={(event) => {
+              onClick={(event: MouseEvent<HTMLButtonElement>) => {
                 closeActionMenu(event);
                 onCloseWorkspace();
               }}

@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
+import { loadSettings, snapshotTerminalSettings, type TerminalPaneSettings } from "../settings";
 import type { TerminalOutputEvent } from "../types";
 
 type UseTerminalSessionOptions = {
@@ -23,6 +24,11 @@ export function useTerminalSession({
   onTitleChange,
 }: UseTerminalSessionOptions) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const paneSettingsRef = useRef<TerminalPaneSettings | null>(null);
+  if (paneSettingsRef.current === null) {
+    paneSettingsRef.current = snapshotTerminalSettings(loadSettings(), cwd);
+  }
+  const paneSettings = paneSettingsRef.current;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -30,12 +36,12 @@ export function useTerminalSession({
 
     const terminal = new Terminal({
       allowProposedApi: false,
-      cursorBlink: true,
-      cursorStyle: "bar",
-      fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
-      fontSize: 13,
-      lineHeight: 1.25,
-      scrollback: 10_000,
+      cursorBlink: paneSettings.appearance.cursorBlink,
+      cursorStyle: paneSettings.appearance.cursorStyle,
+      fontFamily: paneSettings.appearance.fontFamily,
+      fontSize: paneSettings.appearance.fontSize,
+      lineHeight: paneSettings.appearance.lineHeight,
+      scrollback: paneSettings.appearance.scrollback,
       theme: {
         background: "#0b0d12",
         foreground: "#d7dce5",
@@ -102,7 +108,9 @@ export function useTerminalSession({
       await invoke("spawn_terminal", {
         workspaceId,
         sessionId,
-        cwd: cwd || null,
+        cwd: paneSettings.workingDirectory || null,
+        shellProfileId: paneSettings.shellProfileId,
+        startupCommand: paneSettings.startupCommand || null,
         cols: terminal.cols,
         rows: terminal.rows,
       });
@@ -120,7 +128,7 @@ export function useTerminalSession({
 
     void start().catch((error) => {
       if (!disposed) {
-        terminal.writeln(`\r\n[cmux] Failed to start terminal: ${String(error)}\r\n`);
+        terminal.writeln(`\r\n[TonyMux] Failed to start terminal: ${String(error)}\r\n`);
       }
     });
 
@@ -132,7 +140,7 @@ export function useTerminalSession({
 
       void invoke("write_terminal", { sessionId, data }).catch((error) => {
         if (!disposed) {
-          terminal.writeln(`\r\n[cmux] Input error: ${String(error)}\r\n`);
+          terminal.writeln(`\r\n[TonyMux] Input error: ${String(error)}\r\n`);
         }
       });
     });
@@ -162,7 +170,7 @@ export function useTerminalSession({
       terminal.dispose();
       void invoke("close_terminal", { sessionId }).catch(() => undefined);
     };
-  }, [cwd, onAttention, onTitleChange, sessionId, workspaceId]);
+  }, [onAttention, onTitleChange, paneSettings, sessionId, workspaceId]);
 
   return hostRef;
 }
