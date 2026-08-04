@@ -30,11 +30,24 @@ jobs:
 
           patch_b64="$RUNNER_TEMP/tonymux.patch.b64"
           patch_file="$RUNNER_TEMP/tonymux.patch"
+          patch_parts=(
+            .chatgpt/tonymux-patch/part-00.txt
+            .chatgpt/tonymux-patch/part-01.txt
+            .chatgpt/tonymux-patch/part-02.txt
+            .chatgpt/tonymux-patch/part-03.txt
+            .chatgpt/tonymux-patch/part-04.txt
+            .chatgpt/tonymux-patch/part-050.txt
+            .chatgpt/tonymux-patch/part-051.txt
+            .chatgpt/tonymux-patch/part-052.txt
+            .chatgpt/tonymux-patch/part-053.txt
+            .chatgpt/tonymux-patch/part-06.txt
+            .chatgpt/tonymux-patch/part-07.txt
+          )
 
-          sha256sum .chatgpt/tonymux-patch/part-*.txt
-          cat .chatgpt/tonymux-patch/part-*.txt > "$patch_b64"
+          sha256sum "${patch_parts[@]}"
+          cat "${patch_parts[@]}" > "$patch_b64"
           base64 --decode "$patch_b64" > "$patch_file"
-          sha256sum "$patch_b64" "$patch_file"
+          echo "35e4f383535afb68e0e49d332becb12357effd02c4e788307bd292902a908e16  $patch_b64" | sha256sum --check
           echo "15e7f088878b61a728db3eabfdb5a5caea67b805fac41afd12ac373518d27d5b  $patch_file" | sha256sum --check
           test -s "$patch_file"
           echo "patch_file=$patch_file" >> "$GITHUB_OUTPUT"
@@ -113,6 +126,7 @@ jobs:
           set -euo pipefail
           cat > "$RUNNER_TEMP/tonymux-design-verification.txt" <<EOF
           base_sha=1102c1582be618d0d7a9fe03d9568ac94e37aac7
+          patch_base64_sha256=35e4f383535afb68e0e49d332becb12357effd02c4e788307bd292902a908e16
           patch_sha256=15e7f088878b61a728db3eabfdb5a5caea67b805fac41afd12ac373518d27d5b
           commit_sha=${{ steps.apply.outputs.commit_sha }}
           tree_sha=${{ steps.apply.outputs.tree_sha }}
