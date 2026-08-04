@@ -70,7 +70,7 @@
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  color: var(--tm-focus);
+  color: var(--tm-info);
 }
 
 .browser-pane__loading > svg {
@@ -100,13 +100,13 @@
 }
 
 .browser-pane__feedback--notice {
-  border-bottom-color: rgba(228, 184, 106, 0.34);
+  border-bottom-color: var(--tm-warning-border);
   background: var(--tm-warning-soft);
   color: var(--tm-warning);
 }
 
 .browser-pane__feedback--error {
-  border-bottom-color: rgba(239, 130, 146, 0.36);
+  border-bottom-color: var(--tm-danger-border);
   background: var(--tm-danger-soft);
   color: var(--tm-danger-strong);
 }

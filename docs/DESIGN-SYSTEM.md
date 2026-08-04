@@ -1,16 +1,17 @@
-# TonyMux Design System — Quiet Operator
+# TonyMux Design System — Tony Workspace
 
-> **Status:** Approved product baseline
-> **Version:** 1.0
-> **Implementation:** Incremental adoption pending
+> **Status:** Active product baseline
+> **Version:** 2.0
+> **Primary mode:** Workspace
+> **Shared foundation:** `tony-design-system` 1.0
 
-This document is the source of truth for future TonyMux UI design, review, and implementation. Material visual-direction changes must update this document in the same pull request.
+This document is the product-specific source of truth for TonyMux UI design, review, and implementation. Shared Tony foundations define the visual DNA; this file defines how those foundations apply to a Windows desktop terminal workspace.
 
 ## Product definition
 
 TonyMux is a Windows 11 developer workspace for terminal-driven and AI-assisted workflows. It is not an API dashboard, analytics console, model router, billing product, or mobile application.
 
-The interface must prioritize:
+The interface prioritizes:
 
 - multiple project workspaces;
 - ConPTY terminal panes;
@@ -20,135 +21,149 @@ The interface must prioritize:
 - agent-attention signals;
 - keyboard-first commands;
 - settings, shell profiles, trust state, shortcuts, and session restoration;
-- local automation without turning the product into an operations dashboard.
+- local automation without an operations-dashboard shell.
 
-A TonyMux screen should still look like a developer workspace when labels and branding are removed.
+A TonyMux screen must still read as a developer workspace when labels and branding are removed.
 
-## Direction: Quiet Operator
+## Product mode: Workspace
 
-Quiet Operator is dark, precise, compact, and low-distraction.
+TonyMux uses the shared Tony **Workspace** mode:
+
+- compact but legible information density;
+- sidebars, command surfaces, panes, structured status, and technical metadata;
+- Inter for general UI and JetBrains Mono only for commands, paths, identifiers, logs, and shortcuts;
+- borders and surface changes before cards or shadows;
+- explicit loading, error, disabled, selected, active, and attention states;
+- no charts, KPI cards, or dashboard regions unless they answer a real operational question.
+
+## Direction: Tony Workspace
+
+Tony Workspace is dark-primary, warm-neutral, precise, and low-distraction. It keeps the useful structure of the original Quiet Operator direction while replacing its cool blue product identity with the shared Tony foundation.
 
 Use:
 
+- warm neutral surfaces;
+- Tony Lime as a controlled brand and high-importance selection signal;
+- blue only for keyboard focus and informational states;
+- semantic green, amber, and red for health, caution, and failure;
 - border-led flat surfaces;
-- restrained technical metadata;
-- Windows-native typography and behavior;
-- explicit focus, running, warning, failure, and attention states;
+- explicit text or icons alongside status colors;
 - terminal and browser content as the visual center.
 
 Avoid:
 
-- cyberpunk neon or decorative glow;
+- cyberpunk neon and decorative glow;
 - glass across primary surfaces;
 - dashboard card grids and decorative charts;
 - large gradients;
-- mobile navigation patterns;
+- all-monospace UI;
+- Tony Lime as success green or on every action;
 - excessive rounded pills;
 - effects that compete with terminal or browser content.
 
 ## Principles
 
 1. **Content over chrome** — terminal and browser content dominate.
-2. **One interaction accent** — blue means focus, selection, and primary interaction.
-3. **Dense, not cramped** — show technical context through grouping and hierarchy.
-4. **State is explicit** — pair color with text, icon, shape, or position.
-5. **Windows-native precision** — use familiar desktop sizing and interaction.
-6. **Keyboard first, pointer complete** — fast by keyboard, discoverable by pointer.
-7. **Progressive detail** — advanced trust and automation details stay available without overwhelming the workspace.
+2. **Tony identity with restraint** — Lime marks brand, a selected workspace, the active pane, and a controlled primary action.
+3. **Focus remains independent** — blue focus rings identify keyboard focus and are never replaced by Lime.
+4. **Dense, not cramped** — technical context is grouped and readable at desktop density.
+5. **State is explicit** — pair color with text, icon, shape, or position.
+6. **Keyboard first, pointer complete** — fast by keyboard and discoverable by pointer.
+7. **Progressive detail** — trust, persistence, and automation details remain available without overwhelming the workspace.
 
 ## Foundation tokens
 
-These are target tokens. Existing CSS variables may migrate incrementally, but new UI should not introduce a competing palette without updating this document.
+Reusable components consume semantic tokens instead of raw colors.
 
 ```css
 :root {
-  --tm-canvas: #0a0d12;
-  --tm-surface-0: #0e1218;
-  --tm-surface-1: #121821;
-  --tm-surface-2: #18202b;
-  --tm-surface-3: #202a37;
-  --tm-hover: #1b2531;
+  color-scheme: dark;
 
-  --tm-border-subtle: #222b36;
-  --tm-border-default: #2d3846;
-  --tm-border-strong: #425166;
+  --tm-canvas: #10100f;
+  --tm-surface-0: #151513;
+  --tm-surface-1: #191917;
+  --tm-surface-2: #222220;
+  --tm-surface-3: #282825;
+  --tm-hover: #2d2d2a;
 
-  --tm-text-strong: #f1f4f8;
-  --tm-text: #c7cfda;
-  --tm-text-muted: #8792a2;
-  --tm-text-faint: #626d7c;
+  --tm-border-subtle: #2d2d2a;
+  --tm-border-default: #3d3d39;
+  --tm-border-strong: #5f5f59;
 
-  --tm-focus: #72a7ff;
-  --tm-focus-soft: rgba(114, 167, 255, 0.12);
-  --tm-focus-ring: rgba(114, 167, 255, 0.78);
-  --tm-focus-fill: #376abc;
-  --tm-focus-fill-hover: #3f72c8;
+  --tm-text-strong: #f5f5f4;
+  --tm-text: #c6c6c1;
+  --tm-text-muted: #a4a49f;
+  --tm-text-faint: #73736e;
 
-  --tm-success: #66c997;
-  --tm-warning: #e4b86a;
-  --tm-warning-soft: rgba(228, 184, 106, 0.10);
-  --tm-danger: #ef8292;
-  --tm-danger-soft: rgba(239, 130, 146, 0.10);
-  --tm-danger-strong: #ffc2cb;
-  --tm-attention: #b9a0ff;
-  --tm-attention-soft: rgba(185, 160, 255, 0.12);
+  --tm-brand: #d4ff40;
+  --tm-brand-strong: #e3ff8a;
+  --tm-on-brand: #101204;
+  --tm-brand-soft: rgba(212, 255, 64, 0.10);
+  --tm-brand-soft-strong: rgba(212, 255, 64, 0.16);
+  --tm-brand-border: rgba(212, 255, 64, 0.36);
 
-  --tm-font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --tm-font-mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+  --tm-focus: #7aa7ff;
+  --tm-focus-soft: rgba(122, 167, 255, 0.12);
+  --tm-focus-ring: rgba(122, 167, 255, 0.88);
 
-  --tm-motion-fast: 100ms;
-  --tm-motion-standard: 150ms;
-  --tm-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --tm-info: #7aa7ff;
+  --tm-success: #86d9a5;
+  --tm-warning: #f1bd72;
+  --tm-danger: #ff9aa8;
 
-  --tm-z-settings: 90;
-  --tm-z-command-palette: 100;
+  --tm-font-ui: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --tm-font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+
+  --tm-motion-fast: 120ms;
+  --tm-motion-standard: 180ms;
+  --tm-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 ```
 
-### Semantic color contract
+### Color contract
 
-| Color | Reserved meaning |
+| Token family | Reserved meaning |
 |---|---|
-| Blue | active workspace, active pane, keyboard focus, selected command, primary action |
-| Green | connected, running, healthy, or clean |
-| Amber | modified, degraded, timeout, or caution |
-| Red | destructive, failure, or blocked |
-| Violet | an agent or process requires human input |
+| Tony Lime | brand marker, selected workspace, active pane marker, agent/AI signal, one controlled primary action |
+| Blue | visible keyboard focus, information, browser loading, restored-history boundary |
+| Green | connected, running, healthy, trusted, or clean |
+| Amber | modified, degraded, changed, timeout, or caution |
+| Red | destructive, failed, blocked, invalid, missing, or untrusted |
+| Warm neutral | application chrome, content hierarchy, hover, inactive controls |
 
-Violet is not generic branding. Agent attention must remain distinct from selection and focus.
-
-Primary filled controls use the darker `--tm-focus-fill` pair so white labels retain WCAG AA contrast. Modal layers use the documented z-index tokens rather than ad-hoc values.
+Tony Lime and green are not interchangeable. Pane selection and keyboard focus may coexist: selection uses Lime structure; the focused control uses the blue focus ring.
 
 ### Typography
 
-| Token | Size / line height | Use |
+| Role | Size / line height | Use |
 |---|---:|---|
-| `label-xs` | 10 / 14 | section labels and compact metadata |
-| `body-sm` | 11 / 16 | secondary sidebar text and hints |
-| `body` | 12 / 18 | buttons, pane titles, standard UI |
-| `title-sm` | 13 / 18 | workspace title |
-| `title` | 15 / 20 | dialog and command-palette title |
-| `mono` | 12–13 / 1.35 | terminal, branch, port, command, shortcut |
+| Workspace title | 14 / 20 | active workspace identity |
+| UI body | 13 / 19 | workspace titles and primary labels |
+| Compact control | 11–12 / 16 | desktop buttons and pane chrome |
+| Metadata | 10–11 / 15 | repository, path, secondary context |
+| Micro label | 8–10 / 13 | counts, state chips, keyboard hints |
+| Mono | 10–13 / 1.35 | terminal, branch, port, command, shortcut |
 
-Use monospace for technical values, not for the whole application UI.
+Inter Variable is the primary UI face. Segoe UI remains a platform fallback. JetBrains Mono is the default terminal and technical face; existing user-saved terminal font preferences remain valid.
 
 ### Dimensions
 
-TonyMux uses a 4px spacing unit.
+TonyMux uses a 4px spacing rhythm.
 
 | Surface | Target |
 |---|---:|
 | Expanded sidebar | 248px |
-| Workspace topbar | 54px |
+| Workspace topbar | 56px |
 | Pane header | 32px |
-| Standard control | 30px high |
-| Compact icon button | 28–30px square |
-| Workspace row | 64px minimum |
-| Minimum pane width | 320px |
+| Standard control | 32px high |
+| Compact icon button | 28–32px square |
+| Workspace row | 68px minimum; 84px with metadata |
+| Minimum pane width | 300–320px |
 | Resizer hit target | 8px |
 | Visible resizer grip | 2px |
 
-Use 4px radius for tiny labels, 6px for controls, 8px for workspace rows and menus, and 12px only for the command palette and Settings. Primary surfaces use borders rather than shadows.
+Use 4px radius for tiny labels, 6px for controls, 8px for workspace rows and menus, and 12px only for the command palette and Settings. Primary surfaces use borders rather than shadows. Shadows are reserved for elevated popovers and dialogs.
 
 ## Layout contract
 
@@ -170,100 +185,103 @@ Git, pull-request, port, session, and agent information belongs in contextual ch
 
 ### `WorkspaceSidebar`
 
-- Active row uses a blue inset edge and calm tinted fill.
-- Modified state uses amber plus explicit text or an accessible tooltip.
-- Agent input uses violet plus a `Needs input` accessible label.
-- PR, divergence, and ports use compact metadata chips.
-- Close remains keyboard reachable.
-- Workspace numbers remain visible for `Ctrl+1` through `Ctrl+9`.
+- Active row uses a Lime inset edge, restrained Lime tint, and stronger text.
+- Modified state uses amber plus an accessible `Modified` label.
+- Agent input uses a Lime bell plus an accessible unread label.
+- PR, divergence, and ports remain compact neutral metadata chips.
+- Close appears on hover or focus and remains keyboard reachable.
+- Workspace numbers stay visible for `Ctrl+1` through `Ctrl+9`.
 
 ### `WorkspaceTopbar`
 
 - Leading area: sidebar toggle, workspace title, clean/modified state, repository, branch, and pane context.
-- Action area: new workspace, split terminal, browser pane, clear attention, command palette, overflow, and Settings.
+- Action area: one Lime `New workspace` action, neutral pane actions, command palette, overflow, and Settings.
+- Clean is green; modified is amber. Neither uses Lime.
 - Collapse text labels before removing actions at narrower desktop widths.
 
 ### `ResizablePaneGrid`
 
 - Use a neutral split canvas.
-- Keep the existing keyboard-accessible resizer.
+- Keep the keyboard-accessible resizer.
+- Hover/active resizer feedback uses Lime; actual keyboard focus still receives a blue outline.
 - Focus belongs to the active pane, not the grid background.
 
 ### `TerminalPane`
 
 - Terminal content is darker and flatter than application chrome.
-- Active and agent-attention states can coexist.
-- Restored history remains clearly separate from the live shell.
+- The active pane uses a thin Lime structural marker.
+- Agent attention uses a named `Needs input` Lime chip; it does not rely on color alone.
+- Restored history uses informational blue so it is not confused with live selection or AI attention.
 
 ### `BrowserPane`
 
 - Navigation stays in one compact row.
 - Native WebView2 content remains dominant.
-- Loading, timeout, rejection, and recoverable errors use inline banners.
+- Loading uses informational blue.
+- Timeout/caution uses amber and errors use red with inline recovery actions.
 
 ### `CommandPalette`
 
 - Target width: 640px, positioned near 10–12vh.
 - Search receives focus immediately.
 - Group by Workspace, Pane, Application, and Destructive.
-- Selected commands use a flat blue-tinted background.
+- Selected commands use a flat Lime-tinted state; destructive commands keep red semantics.
 
 ### `SettingsDialog`
 
-Group settings by Shells, Terminal, Keyboard shortcuts, Persistence, Trusted executables, and Import/Export/Recovery. Use progressive disclosure for trust identity and recovery details.
+- Group settings by Shells, Terminal, Keyboard shortcuts, Persistence, Trusted executables, and Import/Export/Recovery.
+- Selected profiles and the Save action use controlled Lime states.
+- Form focus remains blue.
+- Success, warning, and error messages use semantic colors.
+- Progressive disclosure contains trust identity and recovery detail.
 
-## Interaction and accessibility
+## Responsive behavior
 
-- Hover and focus transitions: 100–150ms.
-- Avoid bounce, scale, and decorative spring motion.
-- Respect `prefers-reduced-motion` globally.
-- Normal text targets WCAG AA contrast.
-- Icon-only controls require an accessible name and tooltip.
+TonyMux remains desktop-first.
+
+- At narrower desktop widths, reduce the sidebar and collapse action text before removing actions.
+- Below the split-pane threshold, panes stack vertically and the pointer resizer is removed.
+- Dialogs switch to one-column forms and wrapped action rows.
+- No mobile bottom navigation, card feed, or dashboard transformation is introduced.
+
+## Accessibility and motion
+
+- Visible blue 2px focus rings with an offset where space permits.
 - Status never depends on color alone.
-- Command Palette and Settings trap focus and close with Escape.
-- Dense desktop targets should not fall below 28px.
-- Truncated technical values retain a discoverable full value.
+- Icon-only controls require accessible labels and tooltips.
+- Pane resizer supports keyboard adjustment.
+- Command palette and Settings manage focus and close with Escape.
+- Dense pointer targets are at least 28px; primary controls are 32px.
+- Motion is 120–180ms and communicates state only.
+- `prefers-reduced-motion` and forced-colors modes are supported.
 
-## Implementation mapping
+## Composition gate
 
-| Existing surface | Quiet Operator target |
-|---|---|
-| `src/components/WorkspaceSidebar.tsx` | workspace hierarchy, metadata, unread attention |
-| `src/components/WorkspaceTopbar.tsx` | compact contextual header and grouped actions |
-| `src/components/ResizablePaneGrid.tsx` | neutral split canvas and accessible resizer |
-| `src/components/TerminalPane.tsx` | focused terminal, restored boundary, attention state |
-| `src/components/BrowserPane.tsx` | compact navigation and inline recovery |
-| `src/components/CommandPalette.tsx` | elevated keyboard-first action surface |
-| `src/components/SettingsDialog.tsx` | dense structured form and trust lifecycle |
-| `src/styles.css` and feature CSS | incremental token and state migration |
+Before adding UI structure, use this order:
 
-The current implementation already follows parts of this direction, but its existing values are not yet the complete Quiet Operator system.
+1. typography hierarchy;
+2. spacing;
+3. alignment and grid;
+4. divider or border;
+5. surface change;
+6. card;
+7. shadow.
 
-## Adoption sequence
+A card, table, chart, gradient, or dashboard region must answer a concrete user question. Remove it when the function is decorative or duplicates existing context.
 
-1. Introduce `--tm-*` tokens and map current variables to them.
-2. Normalize typography to Segoe UI Variable and Cascadia Code fallbacks.
-3. Align sidebar, topbar, pane header, and control dimensions.
-4. Separate focus blue from agent-attention violet.
-5. Normalize active, loading, warning, failure, and recovery states.
-6. Apply the system to Command Palette and Settings.
-7. Capture common Windows desktop sizes and run accessibility checks.
+## Review gate
 
-Adopt the system in reviewable slices. Do not combine a full visual rewrite with structural or behavioral changes.
+A TonyMux UI change is ready for approval only when:
 
-## Review checklist
+- the terminal/browser workflow remains visually dominant;
+- warm neutral and semantic tokens replace reusable raw colors;
+- Tony Lime is controlled and not used as success;
+- keyboard focus remains visibly blue;
+- realistic clean, modified, attention, loading, error, disabled, selected, and restored states are checked;
+- narrow desktop behavior does not overflow or hide primary actions;
+- reduced-motion and forced-colors behavior remain intact;
+- exact-build tests and visual evidence identify the reviewed revision.
 
-- Does terminal or browser content remain dominant?
-- Is selection blue and human-required attention violet?
-- Is technical metadata explicit without becoming a dashboard?
-- Are keyboard focus and shortcut discovery preserved?
-- Does the change work for terminal and browser panes?
-- Are loading, empty, restored, failure, and attention states covered?
-- Is reduced motion usable?
-- Does the screen still read as a Windows developer workspace without branding?
+## Cheap kill-test
 
-## Product kill-test
-
-The design fails if a screenshot could be mistaken for an API analytics dashboard, billing console, model-provider router, or mobile app.
-
-A representative TonyMux workspace should show workspace navigation, repository and branch context, at least one terminal pane, pane-level focus, keyboard-first actions, and browser or second-terminal splitting when relevant.
+The design fails if a screenshot can be mistaken for an analytics dashboard or a generic blue developer tool. A valid TonyMux screen visibly contains workspace navigation, repository/branch context, a terminal, a browser or second terminal, pane-level selection, keyboard-first actions, warm neutral surfaces, and a restrained Tony Lime signal.

@@ -89,7 +89,7 @@
 .pane-resizer:hover::before,
 .pane-resizer:focus-visible::before,
 .pane-resizer:active::before {
-  background: var(--tm-focus-soft);
+  background: var(--tm-brand-soft);
 }
 
 .pane-resizer > span {
@@ -108,7 +108,7 @@
 .pane-resizer:focus-visible > span,
 .pane-resizer:active > span {
   height: 58px;
-  background: var(--tm-focus);
+  background: var(--tm-brand);
 }
 
 @media (max-width: 760px) {

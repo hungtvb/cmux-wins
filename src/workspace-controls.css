@@ -37,13 +37,13 @@
 }
 
 .workspace-item__close:hover {
-  border-color: #4d2d35;
-  background: #2b181e;
+  border-color: var(--tm-danger-border);
+  background: var(--tm-danger-soft);
   color: var(--tm-danger);
 }
 
 .toolbar-button--command {
-  min-width: 112px;
+  min-width: 116px;
   justify-content: flex-start;
   color: var(--tm-text-muted);
 }

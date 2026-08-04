@@ -6,7 +6,7 @@
   align-items: start;
   justify-items: center;
   padding: clamp(64px, 11vh, 112px) 20px 20px;
-  background: rgba(0, 0, 0, 0.56);
+  background: var(--tm-scrim);
   backdrop-filter: blur(4px);
   animation: command-palette-fade-in var(--tm-motion-fast) ease-out;
 }
@@ -20,7 +20,7 @@
   border: 1px solid var(--tm-border-strong);
   border-radius: 12px;
   background: var(--tm-surface-0);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.46);
+  box-shadow: var(--tm-shadow-dialog);
   animation: command-palette-rise-in var(--tm-motion-standard) var(--tm-ease);
 }
 
@@ -37,7 +37,7 @@
 }
 
 .command-palette__search > svg {
-  color: var(--tm-focus);
+  color: var(--tm-brand);
 }
 
 .command-palette__search input {
@@ -122,15 +122,15 @@
 }
 
 .command-palette__item--active {
-  border-color: rgba(114, 167, 255, 0.34);
-  background: var(--tm-focus-soft);
+  border-color: var(--tm-brand-border);
+  background: var(--tm-brand-soft);
   color: var(--tm-text-strong);
 }
 
 .command-palette__item--danger:hover,
 .command-palette__item--danger.command-palette__item--active {
-  border-color: rgba(239, 130, 146, 0.4);
-  background: rgba(239, 130, 146, 0.1);
+  border-color: var(--tm-danger-border);
+  background: var(--tm-danger-soft);
 }
 
 .command-palette__item-copy {
@@ -170,7 +170,7 @@
 }
 
 .command-palette__item--active .command-palette__item-hint {
-  color: var(--tm-focus);
+  color: var(--tm-brand);
 }
 
 .command-palette__empty {
