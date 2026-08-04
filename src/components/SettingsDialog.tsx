@@ -1,12 +1,15 @@
 import {
+  AlertTriangle,
   CheckCircle2,
   Database,
   Download,
   Keyboard,
   Plus,
+  RefreshCw,
   RotateCcw,
   Settings2,
   ShieldCheck,
+  ShieldX,
   TerminalSquare,
   Trash2,
   Upload,
@@ -26,6 +29,7 @@ import {
   DEFAULT_SETTINGS,
   MAX_CUSTOM_SHELL_PROFILES,
   SHELL_PROFILES,
+  countCustomShellProfilesUsingExecutable,
   exportSettings,
   findCustomShellProfile,
   importSettings,
@@ -66,22 +70,70 @@ function cloneSettings(settings: AppSettings): AppSettings {
   };
 }
 
-async function queryTrustedExecutables(
-  profiles: CustomShellProfile[],
-): Promise<Record<string, boolean>> {
-  const entries = await Promise.all(
-    profiles.map(async (profile) => {
-      try {
-        const trusted = await invoke<boolean>("is_shell_executable_trusted", {
-          executable: profile.executable,
-        });
-        return [profile.id, trusted] as const;
-      } catch {
-        return [profile.id, false] as const;
-      }
-    }),
-  );
-  return Object.fromEntries(entries);
+type TrustedExecutableStatus = "trusted" | "changed" | "missing" | "unavailable";
+
+type TrustedExecutableSnapshot = {
+  executable: string;
+  sha256: string;
+  sizeBytes: number;
+  status: TrustedExecutableStatus;
+  detail: string | null;
+};
+
+type TrustedShellStoreSnapshot = {
+  healthy: boolean;
+  error: string | null;
+  entries: TrustedExecutableSnapshot[];
+};
+
+type TrustState = {
+  store: TrustedShellStoreSnapshot;
+  profiles: Record<string, boolean>;
+};
+
+const EMPTY_TRUST_STORE: TrustedShellStoreSnapshot = {
+  healthy: true,
+  error: null,
+  entries: [],
+};
+
+async function queryTrustState(profiles: CustomShellProfile[]): Promise<TrustState> {
+  const [store, profileEntries] = await Promise.all([
+    invoke<TrustedShellStoreSnapshot>("get_trusted_shell_store").catch((cause) => ({
+      healthy: false,
+      error: String(cause),
+      entries: [],
+    })),
+    Promise.all(
+      profiles.map(async (profile) => {
+        if (validateCustomShellExecutable(profile.executable)) {
+          return [profile.id, false] as const;
+        }
+        try {
+          const trusted = await invoke<boolean>("is_shell_executable_trusted", {
+            executable: profile.executable,
+          });
+          return [profile.id, trusted] as const;
+        } catch {
+          return [profile.id, false] as const;
+        }
+      }),
+    ),
+  ]);
+  return { store, profiles: Object.fromEntries(profileEntries) };
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (const nextUnit of units.slice(1)) {
+    if (value < 1024) break;
+    value /= 1024;
+    unit = nextUnit;
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
 }
 
 export function SettingsDialog({
@@ -96,6 +148,7 @@ export function SettingsDialog({
   const historyHelpId = useId();
   const shortcutsHelpId = useId();
   const shortcutsStatusId = useId();
+  const trustStoreStatusId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const trustQueryGenerationRef = useRef(0);
@@ -106,7 +159,10 @@ export function SettingsDialog({
   const [recordingActionId, setRecordingActionId] = useState<ShortcutActionId | null>(null);
   const [shortcutError, setShortcutError] = useState("");
   const [trustedExecutables, setTrustedExecutables] = useState<Record<string, boolean>>({});
+  const [trustStore, setTrustStore] = useState<TrustedShellStoreSnapshot>(EMPTY_TRUST_STORE);
+  const [trustStoreLoading, setTrustStoreLoading] = useState(false);
   const [trustPendingId, setTrustPendingId] = useState<string | null>(null);
+  const [trustStorePendingPath, setTrustStorePendingPath] = useState<string | null>(null);
   const [trustStatus, setTrustStatus] = useState("");
 
   useEffect(() => {
@@ -122,11 +178,15 @@ export function SettingsDialog({
     setRecordingActionId(null);
     setShortcutError("");
     setTrustPendingId(null);
+    setTrustStorePendingPath(null);
+    setTrustStoreLoading(true);
     setTrustStatus("");
     const trustQueryGeneration = ++trustQueryGenerationRef.current;
-    void queryTrustedExecutables(settings.customShellProfiles).then((trusted) => {
+    void queryTrustState(settings.customShellProfiles).then((trustState) => {
       if (!disposed && trustQueryGeneration === trustQueryGenerationRef.current) {
-        setTrustedExecutables(trusted);
+        setTrustedExecutables(trustState.profiles);
+        setTrustStore(trustState.store);
+        setTrustStoreLoading(false);
       }
     });
     requestAnimationFrame(() => {
@@ -153,9 +213,24 @@ export function SettingsDialog({
     }));
   };
 
+  const refreshTrustState = async (
+    profiles: CustomShellProfile[] = draftRef.current.customShellProfiles,
+    successMessage?: string,
+  ) => {
+    const generation = ++trustQueryGenerationRef.current;
+    setTrustStoreLoading(true);
+    const trustState = await queryTrustState(profiles);
+    if (generation !== trustQueryGenerationRef.current) return;
+    setTrustedExecutables(trustState.profiles);
+    setTrustStore(trustState.store);
+    setTrustStoreLoading(false);
+    if (successMessage) setTrustStatus(successMessage);
+  };
+
   const addCustomShellProfile = () => {
     if (draft.customShellProfiles.length >= MAX_CUSTOM_SHELL_PROFILES) return;
     trustQueryGenerationRef.current += 1;
+    setTrustStoreLoading(false);
     const profile: CustomShellProfile = {
       id: `custom:${crypto.randomUUID()}`,
       label: "Custom shell",
@@ -183,29 +258,62 @@ export function SettingsDialog({
     }));
     if (key === "executable") {
       trustQueryGenerationRef.current += 1;
+      setTrustStoreLoading(false);
       setTrustedExecutables((current) => ({ ...current, [profileId]: false }));
       setTrustStatus("Executable path changed. Trust must be granted again.");
     }
   };
 
-  const removeCustomShellProfile = (profileId: string) => {
-    trustQueryGenerationRef.current += 1;
-    setDraft((current) => ({
-      ...current,
+  const removeCustomShellProfile = async (profileId: string) => {
+    const currentDraft = draftRef.current;
+    const profile = currentDraft.customShellProfiles.find((candidate) => candidate.id === profileId);
+    if (!profile) return;
+    const executable = normalizeCustomShellExecutable(profile.executable);
+    const otherReferences = countCustomShellProfilesUsingExecutable(
+      currentDraft,
+      executable,
+      profileId,
+    );
+    let trustRevoked = false;
+
+    if (executable && otherReferences === 0 && trustStore.healthy) {
+      const confirmed = window.confirm(
+        `Remove ${profile.label || "this profile"} and revoke any trust record for ${executable}? Existing terminal processes will keep running.`,
+      );
+      if (!confirmed) return;
+      setTrustPendingId(profileId);
+      try {
+        trustRevoked = await invoke<boolean>("revoke_shell_executable", { executable });
+      } catch (cause) {
+        setTrustStatus(`Unable to revoke ${executable}: ${String(cause)}`);
+        setTrustPendingId(null);
+        return;
+      }
+    }
+
+    const remainingProfiles = currentDraft.customShellProfiles.filter(
+      (candidate) => candidate.id !== profileId,
+    );
+    const nextDraft = {
+      ...currentDraft,
       defaultShellProfileId:
-        current.defaultShellProfileId === profileId
+        currentDraft.defaultShellProfileId === profileId
           ? DEFAULT_SETTINGS.defaultShellProfileId
-          : current.defaultShellProfileId,
-      customShellProfiles: current.customShellProfiles.filter(
-        (profile) => profile.id !== profileId,
-      ),
-    }));
-    setTrustedExecutables((current) => {
-      const next = { ...current };
-      delete next[profileId];
-      return next;
-    });
-    setTrustStatus("Custom shell profile removed. Existing terminal processes are unchanged.");
+          : currentDraft.defaultShellProfileId,
+      customShellProfiles: remainingProfiles,
+    };
+    setDraft(nextDraft);
+    draftRef.current = nextDraft;
+    setTrustPendingId(null);
+    const message =
+      otherReferences > 0
+        ? "Profile removed. Trust was retained because another profile uses the same executable."
+        : trustRevoked
+          ? "Profile removed and its final executable trust was revoked."
+          : !trustStore.healthy
+            ? "Profile removed. Reset the unreadable trust store separately before trusting another executable."
+            : "Profile removed. No persisted trust record needed revocation.";
+    await refreshTrustState(remainingProfiles, message);
   };
 
   const trustCustomShellProfile = async (profile: CustomShellProfile) => {
@@ -234,19 +342,63 @@ export function SettingsDialog({
         );
         return;
       }
-      setDraft((current) => ({
-        ...current,
-        customShellProfiles: current.customShellProfiles.map((candidate) =>
-          candidate.id === profile.id ? { ...candidate, executable } : candidate,
-        ),
-      }));
-      setTrustedExecutables((current) => ({ ...current, [profile.id]: true }));
-      setTrustStatus(`${profile.label || "Custom shell"} is trusted on this Windows account.`);
+      const currentDraft = draftRef.current;
+      const nextProfiles = currentDraft.customShellProfiles.map((candidate) =>
+        candidate.id === profile.id ? { ...candidate, executable } : candidate,
+      );
+      const nextDraft = { ...currentDraft, customShellProfiles: nextProfiles };
+      setDraft(nextDraft);
+      draftRef.current = nextDraft;
+      await refreshTrustState(
+        nextProfiles,
+        `${profile.label || "Custom shell"} is trusted by SHA-256 identity on this Windows account.`,
+      );
     } catch (cause) {
       setTrustedExecutables((current) => ({ ...current, [profile.id]: false }));
       setTrustStatus(`Unable to trust ${profile.label || "custom shell"}: ${String(cause)}`);
     } finally {
       setTrustPendingId(null);
+    }
+  };
+
+  const revokeTrustedExecutable = async (entry: TrustedExecutableSnapshot) => {
+    if (!window.confirm(`Revoke trust for ${entry.executable}? New terminal panes cannot launch it until trusted again.`)) {
+      return;
+    }
+    setTrustStorePendingPath(entry.executable);
+    setTrustStatus(`Revoking ${entry.executable}…`);
+    try {
+      await invoke<boolean>("revoke_shell_executable", { executable: entry.executable });
+      await refreshTrustState(
+        draftRef.current.customShellProfiles,
+        `Trust revoked for ${entry.executable}.`,
+      );
+    } catch (cause) {
+      setTrustStatus(`Unable to revoke ${entry.executable}: ${String(cause)}`);
+    } finally {
+      setTrustStorePendingPath(null);
+    }
+  };
+
+  const clearTrustedExecutables = async () => {
+    const message = trustStore.healthy
+      ? "Clear every trusted custom executable? All custom profiles must be trusted again before launch."
+      : "Reset the unreadable trust store? Existing trust decisions will be discarded.";
+    if (!window.confirm(message)) return;
+    setTrustStorePendingPath("*");
+    setTrustStatus(trustStore.healthy ? "Clearing trusted executables…" : "Resetting trust store…");
+    try {
+      const removed = await invoke<number>("clear_trusted_shell_executables");
+      await refreshTrustState(
+        draftRef.current.customShellProfiles,
+        trustStore.healthy
+          ? `Cleared ${removed} trusted executable${removed === 1 ? "" : "s"}.`
+          : "Trust store reset. Custom executables must be trusted again.",
+      );
+    } catch (cause) {
+      setTrustStatus(`Unable to reset trusted executables: ${String(cause)}`);
+    } finally {
+      setTrustStorePendingPath(null);
     }
   };
 
@@ -325,7 +477,10 @@ export function SettingsDialog({
     setShortcutError("");
     trustQueryGenerationRef.current += 1;
     setTrustedExecutables({});
+    setTrustStore(EMPTY_TRUST_STORE);
+    setTrustStoreLoading(false);
     setTrustPendingId(null);
+    setTrustStorePendingPath(null);
     setTrustStatus("");
   };
 
@@ -424,16 +579,20 @@ export function SettingsDialog({
       const imported = importSettings(await file.text());
       const trustQueryGeneration = ++trustQueryGenerationRef.current;
       setDraft(imported);
-      const trusted = await queryTrustedExecutables(imported.customShellProfiles);
+      draftRef.current = imported;
+      setTrustStoreLoading(true);
+      const trustState = await queryTrustState(imported.customShellProfiles);
       if (trustQueryGeneration === trustQueryGenerationRef.current) {
-        setTrustedExecutables(trusted);
+        setTrustedExecutables(trustState.profiles);
+        setTrustStore(trustState.store);
+        setTrustStoreLoading(false);
       }
       setErrors([]);
       setRecordingActionId(null);
       setShortcutError("");
       setTrustStatus(
         imported.customShellProfiles.length
-          ? "Imported executable paths remain untrusted unless this Windows account already trusted them."
+          ? "Imported executable paths remain untrusted unless this Windows account already trusts the same file identity."
           : "",
       );
     } catch (cause) {
@@ -522,7 +681,11 @@ export function SettingsDialog({
                 <button
                   className="settings-button settings-button--quiet settings-button--compact"
                   type="button"
-                  disabled={draft.customShellProfiles.length >= MAX_CUSTOM_SHELL_PROFILES}
+                  disabled={
+                    draft.customShellProfiles.length >= MAX_CUSTOM_SHELL_PROFILES ||
+                    trustPendingId !== null ||
+                    trustStorePendingPath !== null
+                  }
                   onClick={addCustomShellProfile}
                 >
                   <Plus size={13} aria-hidden="true" />
@@ -541,6 +704,23 @@ export function SettingsDialog({
                     const selected = draft.defaultShellProfileId === profile.id;
                     const executableError = validateCustomShellExecutable(profile.executable);
                     const trusted = trustedExecutables[profile.id] === true;
+                    const normalizedExecutable = normalizeCustomShellExecutable(profile.executable);
+                    const trustedEntry = trustStore.entries.find(
+                      (entry) =>
+                        normalizeCustomShellExecutable(entry.executable).toLocaleLowerCase("en-US") ===
+                        normalizedExecutable.toLocaleLowerCase("en-US"),
+                    );
+                    const identityStatus = trusted ? "trusted" : trustedEntry?.status ?? "untrusted";
+                    const identityLabel =
+                      identityStatus === "trusted"
+                        ? "Trusted identity matches"
+                        : identityStatus === "changed"
+                          ? "File changed — trust again"
+                          : identityStatus === "missing"
+                            ? "Trusted file is missing"
+                            : identityStatus === "unavailable"
+                              ? "Identity check unavailable"
+                              : "Not trusted";
                     const pending = trustPendingId === profile.id;
                     const fieldId = profile.id.replace(/[^A-Za-z0-9_-]/g, "-");
                     return (
@@ -568,7 +748,8 @@ export function SettingsDialog({
                             className="settings-button settings-button--danger settings-button--compact"
                             type="button"
                             aria-label={`Remove ${profile.label || "custom shell"}`}
-                            onClick={() => removeCustomShellProfile(profile.id)}
+                            disabled={trustPendingId !== null || trustStorePendingPath !== null}
+                            onClick={() => void removeCustomShellProfile(profile.id)}
                           >
                             <Trash2 size={13} aria-hidden="true" />
                             Remove
@@ -614,18 +795,31 @@ export function SettingsDialog({
                         </div>
 
                         <div className="custom-profile__trust">
-                          <span className={trusted ? "custom-profile__trusted" : "custom-profile__untrusted"}>
-                            {trusted ? (
+                          <span
+                            className={`custom-profile__identity custom-profile__identity--${identityStatus}`}
+                            title={trustedEntry?.detail ?? undefined}
+                          >
+                            {identityStatus === "trusted" ? (
                               <CheckCircle2 size={14} aria-hidden="true" />
+                            ) : identityStatus === "missing" ? (
+                              <ShieldX size={14} aria-hidden="true" />
+                            ) : identityStatus === "changed" || identityStatus === "unavailable" ? (
+                              <AlertTriangle size={14} aria-hidden="true" />
                             ) : (
                               <ShieldCheck size={14} aria-hidden="true" />
                             )}
-                            {trusted ? "Trusted locally" : "Not trusted"}
+                            {identityLabel}
                           </span>
                           <button
                             className="settings-button settings-button--quiet settings-button--compact"
                             type="button"
-                            disabled={Boolean(executableError) || trustPendingId !== null}
+                            disabled={
+                              Boolean(executableError) ||
+                              !trustStore.healthy ||
+                              trustPendingId !== null ||
+                              trustStorePendingPath !== null
+                            }
+                            title={!trustStore.healthy ? "Reset the trust store before adding trust." : undefined}
                             onClick={() => void trustCustomShellProfile(profile)}
                           >
                             <ShieldCheck size={13} aria-hidden="true" />
@@ -638,7 +832,128 @@ export function SettingsDialog({
                 </div>
               )}
 
-              <div className="custom-profile-status" role="status" aria-live="polite">
+              <div className="trusted-shell-store" aria-describedby={trustStoreStatusId}>
+                <div className="trusted-shell-store__heading">
+                  <div>
+                    <strong>Trusted executable identities</strong>
+                    <small>
+                      Trust is bound to the canonical path, SHA-256 fingerprint and file size. Updates require trust again.
+                    </small>
+                  </div>
+                  <button
+                    className="settings-button settings-button--quiet settings-button--compact"
+                    type="button"
+                    disabled={
+                      trustStoreLoading ||
+                      trustPendingId !== null ||
+                      trustStorePendingPath !== null
+                    }
+                    onClick={() =>
+                      void refreshTrustState(
+                        draftRef.current.customShellProfiles,
+                        "Trust status refreshed.",
+                      )
+                    }
+                  >
+                    <RefreshCw size={13} aria-hidden="true" />
+                    {trustStoreLoading ? "Checking…" : "Refresh"}
+                  </button>
+                </div>
+
+                {!trustStore.healthy ? (
+                  <div className="trusted-shell-store__error" role="alert">
+                    <AlertTriangle size={16} aria-hidden="true" />
+                    <div>
+                      <strong>Trust store needs recovery</strong>
+                      <p>{trustStore.error ?? "TonyMux could not read the trust store."}</p>
+                    </div>
+                    <button
+                      className="settings-button settings-button--danger settings-button--compact"
+                      type="button"
+                      disabled={trustPendingId !== null || trustStorePendingPath !== null}
+                      onClick={() => void clearTrustedExecutables()}
+                    >
+                      <RotateCcw size={13} aria-hidden="true" />
+                      {trustStorePendingPath === "*" ? "Resetting…" : "Reset trust store"}
+                    </button>
+                  </div>
+                ) : trustStoreLoading && trustStore.entries.length === 0 ? (
+                  <div className="trusted-shell-store__empty" role="status">
+                    <RefreshCw size={15} aria-hidden="true" />
+                    <span>Checking trusted executable identities…</span>
+                  </div>
+                ) : trustStore.entries.length === 0 ? (
+                  <div className="trusted-shell-store__empty">
+                    <ShieldCheck size={15} aria-hidden="true" />
+                    <span>No executable identity is trusted on this Windows account.</span>
+                  </div>
+                ) : (
+                  <>
+                    <ul className="trusted-shell-store__list" aria-label="Trusted executable identities">
+                      {trustStore.entries.map((entry) => {
+                        const pending = trustStorePendingPath === entry.executable;
+                        const statusLabel =
+                          entry.status === "trusted"
+                            ? "Identity matches"
+                            : entry.status === "changed"
+                              ? "File changed"
+                              : entry.status === "missing"
+                                ? "File missing"
+                                : "Unavailable";
+                        return (
+                          <li className="trusted-shell-entry" key={entry.executable}>
+                            <div className={`trusted-shell-entry__status trusted-shell-entry__status--${entry.status}`}>
+                              {entry.status === "trusted" ? (
+                                <CheckCircle2 size={15} aria-hidden="true" />
+                              ) : entry.status === "missing" ? (
+                                <ShieldX size={15} aria-hidden="true" />
+                              ) : (
+                                <AlertTriangle size={15} aria-hidden="true" />
+                              )}
+                              <span>{statusLabel}</span>
+                            </div>
+                            <div className="trusted-shell-entry__copy">
+                              <code title={entry.executable}>{entry.executable}</code>
+                              <small>
+                                SHA-256 {entry.sha256.slice(0, 16)}… · {formatFileSize(entry.sizeBytes)}
+                              </small>
+                              {entry.detail && <p>{entry.detail}</p>}
+                            </div>
+                            <button
+                              className="settings-button settings-button--danger settings-button--compact"
+                              type="button"
+                              disabled={trustPendingId !== null || trustStorePendingPath !== null}
+                              onClick={() => void revokeTrustedExecutable(entry)}
+                            >
+                              <ShieldX size={13} aria-hidden="true" />
+                              {pending ? "Revoking…" : "Revoke"}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="trusted-shell-store__footer">
+                      <span>{trustStore.entries.length} of 32 trust records used.</span>
+                      <button
+                        className="settings-button settings-button--danger settings-button--compact"
+                        type="button"
+                        disabled={trustPendingId !== null || trustStorePendingPath !== null}
+                        onClick={() => void clearTrustedExecutables()}
+                      >
+                        <Trash2 size={13} aria-hidden="true" />
+                        {trustStorePendingPath === "*" ? "Clearing…" : "Clear all trust"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div
+                id={trustStoreStatusId}
+                className="custom-profile-status"
+                role="status"
+                aria-live="polite"
+              >
                 {trustStatus}
               </div>
             </div>

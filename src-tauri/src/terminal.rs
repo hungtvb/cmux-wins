@@ -3,7 +3,7 @@ use crate::{
     terminal_automation::{
         TerminalAutomationStore, TerminalLifecycleStatus, TerminalReadResult,
     },
-    trusted_shells::{normalize_custom_executable, TrustedShellStore},
+    trusted_shells::{TrustedExecutableGuard, TrustedShellStore},
     workspace_metadata::{
         inspect_workspace_metadata_batch, WorkspaceMetadataEntry, WorkspaceMetadataRequest,
     },
@@ -110,19 +110,27 @@ fn is_custom_profile_id(profile_id: &str) -> bool {
             .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'_' | b'-'))
 }
 
+struct ResolvedShell {
+    executable: String,
+    _trust_guard: Option<TrustedExecutableGuard>,
+}
+
 fn resolve_shell(
     profile_id: &str,
     custom_shell_executable: Option<String>,
     trusted_shells: &TrustedShellStore,
-) -> Result<String, String> {
+) -> Result<ResolvedShell, String> {
     if let Ok(default_shell) = shell_for_profile(profile_id) {
         if custom_shell_executable.is_some() {
             return Err("built-in shell profiles cannot include a custom executable".to_owned());
         }
-        return Ok(env::var("CMUX_SHELL")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| default_shell.to_owned()));
+        return Ok(ResolvedShell {
+            executable: env::var("CMUX_SHELL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| default_shell.to_owned()),
+            _trust_guard: None,
+        });
     }
 
     if !is_custom_profile_id(profile_id) {
@@ -130,13 +138,11 @@ fn resolve_shell(
     }
     let executable = custom_shell_executable
         .ok_or_else(|| "custom shell profile is missing its executable path".to_owned())?;
-    let executable = normalize_custom_executable(&executable)?;
-    if !trusted_shells.is_trusted(&executable)? {
-        return Err(format!(
-            "custom shell executable is not trusted for this Windows account: {executable}"
-        ));
-    }
-    Ok(executable)
+    let guard = trusted_shells.resolve_trusted(&executable)?;
+    Ok(ResolvedShell {
+        executable: guard.executable().to_owned(),
+        _trust_guard: Some(guard),
+    })
 }
 
 fn validate_startup_command(command: Option<String>) -> Result<Option<String>, String> {
@@ -198,11 +204,12 @@ pub(crate) fn spawn_terminal(
         }
     }
 
-    let shell = resolve_shell(
+    let mut resolved_shell = resolve_shell(
         &shell_profile_id,
         custom_shell_executable,
         trusted_shells.inner(),
     )?;
+    let shell = resolved_shell.executable.clone();
     let startup_command = validate_startup_command(startup_command)?;
 
     let pty_system = native_pty_system();
@@ -229,6 +236,13 @@ pub(crate) fn spawn_terminal(
         .slave
         .spawn_command(command)
         .map_err(|error| format!("unable to spawn shell '{shell}': {error}"))?;
+    if let Some(guard) = resolved_shell._trust_guard.as_mut() {
+        if let Err(error) = guard.verify_unchanged() {
+            let _ = child.kill();
+            return Err(error);
+        }
+    }
+    drop(resolved_shell);
     let process_id = child.process_id();
     let mut reader = pair
         .master
@@ -438,7 +452,7 @@ pub(crate) fn resize_terminal(
         .ok_or_else(|| format!("terminal session not found: {session_id}"))?;
 
     let resize_result = {
-        let mut master = session
+        let master = session
             .master
             .lock()
             .map_err(|_| "terminal master lock is poisoned".to_owned())?;
@@ -532,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn custom_shells_require_a_stable_profile_id_and_rust_trust() {
+    fn custom_shells_require_a_stable_profile_id_and_matching_file_identity() {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be after Unix epoch")
@@ -541,33 +555,51 @@ mod tests {
             "tonymux-terminal-trust-{}-{nonce}.json",
             std::process::id()
         ));
-        let store = TrustedShellStore::from_path(path.clone()).expect("store should load");
+        let executable_path = env::temp_dir().join(format!(
+            "tonymux-terminal-shell-{}-{nonce}.exe",
+            std::process::id()
+        ));
+        fs::write(&executable_path, b"trusted terminal shell")
+            .expect("temporary executable should be written");
+        let executable = executable_path.to_string_lossy().to_string();
+        let store = TrustedShellStore::from_path(path.clone());
 
         assert!(resolve_shell(
             "custom:trusted_shell",
-            Some(r"C:\Tools\Shell.exe".to_owned()),
+            Some(executable.clone()),
             &store,
         )
         .is_err());
-        store
-            .trust(r"C:\Tools\Shell.exe")
-            .expect("trust should persist");
-        assert_eq!(
-            resolve_shell(
-                "custom:trusted_shell",
-                Some(r"c:/tools/Shell.exe".to_owned()),
-                &store,
-            )
-            .unwrap(),
-            r"C:\tools\Shell.exe"
-        );
+        store.trust(&executable).expect("trust should persist");
+        let resolved = resolve_shell(
+            "custom:trusted_shell",
+            Some(executable.clone()),
+            &store,
+        )
+        .expect("trusted shell should resolve");
+        let canonical = fs::canonicalize(&executable_path)
+            .expect("temporary executable should canonicalize");
+        let expected = crate::trusted_shells::normalize_canonical_executable(&canonical)
+            .expect("canonical executable should normalize");
+        assert!(resolved.executable.eq_ignore_ascii_case(&expected));
+        drop(resolved);
         assert!(resolve_shell(
             "custom:bad/id",
-            Some(r"C:\Tools\Shell.exe".to_owned()),
+            Some(executable.clone()),
+            &store,
+        )
+        .is_err());
+
+        fs::write(&executable_path, b"changed terminal shell")
+            .expect("temporary executable should be replaced");
+        assert!(resolve_shell(
+            "custom:trusted_shell",
+            Some(executable),
             &store,
         )
         .is_err());
         let _ = fs::remove_file(path);
+        let _ = fs::remove_file(executable_path);
     }
 
     #[test]

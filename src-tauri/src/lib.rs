@@ -20,7 +20,9 @@ use terminal::{
     AppState,
 };
 use trusted_shells::{
-    is_shell_executable_trusted, trust_shell_executable, TrustedShellStore,
+    clear_trusted_shell_executables, get_trusted_shell_store,
+    is_shell_executable_trusted, revoke_shell_executable, trust_shell_executable,
+    TrustedShellStore,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -53,7 +55,10 @@ pub fn run() {
             resolve_automation_request,
             publish_main_frontend_automation_events,
             trust_shell_executable,
-            is_shell_executable_trusted
+            is_shell_executable_trusted,
+            get_trusted_shell_store,
+            revoke_shell_executable,
+            clear_trusted_shell_executables
         ])
         .run(tauri::generate_context!())
         .expect("error while running TonyMux");

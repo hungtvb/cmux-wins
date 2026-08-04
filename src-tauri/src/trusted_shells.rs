@@ -1,114 +1,326 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeSet,
-    env, fs,
-    io::ErrorKind,
+    collections::BTreeMap,
+    env,
+    fs::{self, File, OpenOptions},
+    io::{ErrorKind, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process,
     sync::Mutex,
 };
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
 use tauri::State;
 
-const STORE_VERSION: u32 = 1;
-const STORE_FILE_NAME: &str = "trusted-shells-v1.json";
+const STORE_VERSION: u32 = 2;
+const STORE_FILE_NAME: &str = "trusted-shells-v2.json";
 const MAX_TRUSTED_EXECUTABLES: usize = 32;
 const MAX_EXECUTABLE_LENGTH: usize = 1_024;
-const MAX_STORE_BYTES: u64 = 32 * 1024;
+const MAX_EXECUTABLE_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_STORE_BYTES: u64 = 64 * 1024;
+const HASH_BUFFER_BYTES: usize = 64 * 1024;
+#[cfg(windows)]
+const FILE_SHARE_READ_ONLY: u32 = 0x0000_0001;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TrustedExecutableRecord {
+    executable: String,
+    sha256: String,
+    size_bytes: u64,
+}
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TrustedShellEnvelope {
     version: u32,
-    executables: Vec<String>,
+    executables: Vec<TrustedExecutableRecord>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum TrustedExecutableStatus {
+    Trusted,
+    Changed,
+    Missing,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TrustedExecutableSnapshot {
+    executable: String,
+    sha256: String,
+    size_bytes: u64,
+    status: TrustedExecutableStatus,
+    detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TrustedShellStoreSnapshot {
+    healthy: bool,
+    error: Option<String>,
+    entries: Vec<TrustedExecutableSnapshot>,
+}
+
+struct TrustedShellState {
+    records: BTreeMap<String, TrustedExecutableRecord>,
+    load_error: Option<String>,
 }
 
 pub(crate) struct TrustedShellStore {
     path: Result<PathBuf, String>,
-    executables: Mutex<BTreeSet<String>>,
-    load_error: Option<String>,
+    state: Mutex<TrustedShellState>,
+}
+
+pub(crate) struct TrustedExecutableGuard {
+    executable: String,
+    sha256: String,
+    size_bytes: u64,
+    file: File,
+}
+
+impl TrustedExecutableGuard {
+    pub(crate) fn executable(&self) -> &str {
+        &self.executable
+    }
+
+    pub(crate) fn verify_unchanged(&mut self) -> Result<(), String> {
+        let metadata = self
+            .file
+            .metadata()
+            .map_err(|error| format!("unable to re-inspect custom shell executable: {error}"))?;
+        if metadata.len() != self.size_bytes {
+            return Err(format!(
+                "custom shell executable changed while it was being launched: {}",
+                self.executable
+            ));
+        }
+        self.file
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| format!("unable to rewind custom shell executable: {error}"))?;
+        let sha256 = hash_executable(&mut self.file)?;
+        if sha256 != self.sha256 {
+            return Err(format!(
+                "custom shell executable changed while it was being launched: {}",
+                self.executable
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Default for TrustedShellStore {
     fn default() -> Self {
         match default_store_path() {
-            Ok(path) => match load_trusted_keys(&path) {
-                Ok(executables) => Self {
-                    path: Ok(path),
-                    executables: Mutex::new(executables),
-                    load_error: None,
-                },
-                Err(error) => Self {
-                    path: Ok(path),
-                    executables: Mutex::new(BTreeSet::new()),
-                    load_error: Some(error),
-                },
-            },
+            Ok(path) => Self::from_resolved_path(path),
             Err(error) => Self {
                 path: Err(error.clone()),
-                executables: Mutex::new(BTreeSet::new()),
-                load_error: Some(error),
+                state: Mutex::new(TrustedShellState {
+                    records: BTreeMap::new(),
+                    load_error: Some(error),
+                }),
             },
         }
     }
 }
 
 impl TrustedShellStore {
+    fn from_resolved_path(path: PathBuf) -> Self {
+        match load_trusted_records(&path) {
+            Ok(records) => Self {
+                path: Ok(path),
+                state: Mutex::new(TrustedShellState {
+                    records,
+                    load_error: None,
+                }),
+            },
+            Err(error) => Self {
+                path: Ok(path),
+                state: Mutex::new(TrustedShellState {
+                    records: BTreeMap::new(),
+                    load_error: Some(error),
+                }),
+            },
+        }
+    }
+
     #[cfg(test)]
-    pub(crate) fn from_path(path: PathBuf) -> Result<Self, String> {
-        let executables = load_trusted_keys(&path)?;
-        Ok(Self {
-            path: Ok(path),
-            executables: Mutex::new(executables),
-            load_error: None,
-        })
+    pub(crate) fn from_path(path: PathBuf) -> Self {
+        Self::from_resolved_path(path)
     }
 
     pub(crate) fn is_trusted(&self, executable: &str) -> Result<bool, String> {
         self.ensure_loaded()?;
-        let key = trust_key(executable)?;
-        let executables = self
-            .executables
+        let (current, _guard) = match inspect_executable(executable) {
+            Ok(value) => value,
+            Err(_) => return Ok(false),
+        };
+        let state = self
+            .state
             .lock()
             .map_err(|_| "trusted shell store lock is poisoned".to_owned())?;
-        Ok(executables.contains(&key))
+        Ok(state
+            .records
+            .get(&record_key(&current.executable))
+            .is_some_and(|trusted| records_match(trusted, &current)))
+    }
+
+    pub(crate) fn resolve_trusted(
+        &self,
+        executable: &str,
+    ) -> Result<TrustedExecutableGuard, String> {
+        self.ensure_loaded()?;
+        let (current, guard) = inspect_executable(executable)?;
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "trusted shell store lock is poisoned".to_owned())?;
+        let Some(trusted) = state.records.get(&record_key(&current.executable)) else {
+            return Err(format!(
+                "custom shell executable is not trusted for this Windows account: {}",
+                current.executable
+            ));
+        };
+        if !records_match(trusted, &current) {
+            return Err(format!(
+                "custom shell executable changed after it was trusted and must be trusted again: {}",
+                current.executable
+            ));
+        }
+        drop(state);
+        Ok(TrustedExecutableGuard {
+            executable: current.executable,
+            sha256: current.sha256,
+            size_bytes: current.size_bytes,
+            file: guard,
+        })
     }
 
     pub(crate) fn trust(&self, executable: &str) -> Result<bool, String> {
         self.ensure_loaded()?;
-        let normalized = normalize_custom_executable(executable)?;
-        validate_executable_file(&normalized)?;
-        let key = normalized.to_ascii_lowercase();
+        let (record, mut guard) = inspect_executable(executable)?;
+        verify_file_matches_record(&mut guard, &record)?;
+        let key = record_key(&record.executable);
         let path = self.path.as_ref().map_err(|error| error.clone())?;
-        let mut executables = self
-            .executables
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| "trusted shell store lock is poisoned".to_owned())?;
 
-        if executables.contains(&key) {
+        if state.records.get(&key).is_some_and(|existing| existing == &record) {
             return Ok(true);
         }
-        if executables.len() >= MAX_TRUSTED_EXECUTABLES {
+        if !state.records.contains_key(&key) && state.records.len() >= MAX_TRUSTED_EXECUTABLES {
             return Err(format!(
                 "trusted shell store already contains the maximum of {MAX_TRUSTED_EXECUTABLES} executables"
             ));
         }
 
-        executables.insert(key.clone());
-        if let Err(error) = write_trusted_keys(path, &executables) {
-            executables.remove(&key);
+        let previous = state.records.insert(key.clone(), record);
+        if let Err(error) = write_trusted_records(path, &state.records) {
+            match previous {
+                Some(record) => {
+                    state.records.insert(key, record);
+                }
+                None => {
+                    state.records.remove(&key);
+                }
+            }
             return Err(error);
         }
         Ok(true)
     }
 
-    fn ensure_loaded(&self) -> Result<(), String> {
-        if let Some(error) = &self.load_error {
-            return Err(error.clone());
+    pub(crate) fn revoke(&self, executable: &str) -> Result<bool, String> {
+        self.ensure_loaded()?;
+        let normalized = normalize_custom_executable(executable)?;
+        let mut candidate_keys = vec![record_key(&normalized)];
+        if let Ok((current, _guard)) = inspect_executable(&normalized) {
+            let canonical_key = record_key(&current.executable);
+            if !candidate_keys.contains(&canonical_key) {
+                candidate_keys.push(canonical_key);
+            }
         }
-        self.path
-            .as_ref()
-            .map(|_| ())
-            .map_err(|error| error.clone())
+
+        let path = self.path.as_ref().map_err(|error| error.clone())?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "trusted shell store lock is poisoned".to_owned())?;
+        let Some((key, removed)) = candidate_keys
+            .into_iter()
+            .find_map(|key| state.records.remove(&key).map(|record| (key, record)))
+        else {
+            return Ok(false);
+        };
+
+        if let Err(error) = write_trusted_records(path, &state.records) {
+            state.records.insert(key, removed);
+            return Err(error);
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn clear(&self) -> Result<usize, String> {
+        let path = self.path.as_ref().map_err(|error| error.clone())?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "trusted shell store lock is poisoned".to_owned())?;
+        let previous_records = state.records.clone();
+        let previous_error = state.load_error.clone();
+        let removed = previous_records.len();
+        state.records.clear();
+        state.load_error = None;
+
+        if let Err(error) = write_trusted_records(path, &state.records) {
+            state.records = previous_records;
+            state.load_error = previous_error;
+            return Err(error);
+        }
+        Ok(removed)
+    }
+
+    pub(crate) fn snapshot(&self) -> Result<TrustedShellStoreSnapshot, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "trusted shell store lock is poisoned".to_owned())?;
+        if let Some(error) = &state.load_error {
+            return Ok(TrustedShellStoreSnapshot {
+                healthy: false,
+                error: Some(error.clone()),
+                entries: Vec::new(),
+            });
+        }
+        self.path.as_ref().map_err(|error| error.clone())?;
+        let records: Vec<TrustedExecutableRecord> = state.records.values().cloned().collect();
+        drop(state);
+
+        let entries = records
+            .into_iter()
+            .map(|trusted| snapshot_record(&trusted))
+            .collect();
+        Ok(TrustedShellStoreSnapshot {
+            healthy: true,
+            error: None,
+            entries,
+        })
+    }
+
+    fn ensure_loaded(&self) -> Result<(), String> {
+        self.path.as_ref().map_err(|error| error.clone())?;
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "trusted shell store lock is poisoned".to_owned())?;
+        match &state.load_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
     }
 }
 
@@ -126,6 +338,28 @@ pub(crate) fn is_shell_executable_trusted(
     executable: String,
 ) -> Result<bool, String> {
     store.is_trusted(&executable)
+}
+
+#[tauri::command]
+pub(crate) fn get_trusted_shell_store(
+    store: State<'_, TrustedShellStore>,
+) -> Result<TrustedShellStoreSnapshot, String> {
+    store.snapshot()
+}
+
+#[tauri::command]
+pub(crate) fn revoke_shell_executable(
+    store: State<'_, TrustedShellStore>,
+    executable: String,
+) -> Result<bool, String> {
+    store.revoke(&executable)
+}
+
+#[tauri::command]
+pub(crate) fn clear_trusted_shell_executables(
+    store: State<'_, TrustedShellStore>,
+) -> Result<usize, String> {
+    store.clear()
 }
 
 pub(crate) fn normalize_custom_executable(value: &str) -> Result<String, String> {
@@ -195,17 +429,139 @@ pub(crate) fn normalize_custom_executable(value: &str) -> Result<String, String>
     Ok(normalized)
 }
 
-fn trust_key(executable: &str) -> Result<String, String> {
-    Ok(normalize_custom_executable(executable)?.to_ascii_lowercase())
+fn record_key(executable: &str) -> String {
+    executable.to_ascii_lowercase()
 }
 
-fn validate_executable_file(executable: &str) -> Result<(), String> {
-    let metadata = fs::metadata(executable)
+fn records_match(trusted: &TrustedExecutableRecord, current: &TrustedExecutableRecord) -> bool {
+    trusted.executable.eq_ignore_ascii_case(&current.executable)
+        && trusted.size_bytes == current.size_bytes
+        && trusted.sha256 == current.sha256
+}
+
+fn inspect_executable(executable: &str) -> Result<(TrustedExecutableRecord, File), String> {
+    let normalized = normalize_custom_executable(executable)?;
+    let mut file = open_executable_for_verification(&normalized)?;
+    let metadata = file
+        .metadata()
         .map_err(|error| format!("unable to inspect custom shell executable: {error}"))?;
     if !metadata.is_file() {
         return Err("custom shell executable must reference an existing file".to_owned());
     }
+    if metadata.len() > MAX_EXECUTABLE_BYTES {
+        return Err(format!(
+            "custom shell executable exceeds the {MAX_EXECUTABLE_BYTES} byte verification limit"
+        ));
+    }
+
+    let canonical = fs::canonicalize(&normalized)
+        .map_err(|error| format!("unable to canonicalize custom shell executable: {error}"))?;
+    let canonical = normalize_canonical_executable(&canonical)?;
+    let sha256 = hash_executable(&mut file)?;
+
+    Ok((
+        TrustedExecutableRecord {
+            executable: canonical,
+            sha256,
+            size_bytes: metadata.len(),
+        },
+        file,
+    ))
+}
+
+fn verify_file_matches_record(
+    file: &mut File,
+    expected: &TrustedExecutableRecord,
+) -> Result<(), String> {
+    let metadata = file
+        .metadata()
+        .map_err(|error| format!("unable to re-inspect custom shell executable: {error}"))?;
+    if metadata.len() != expected.size_bytes {
+        return Err(format!(
+            "custom shell executable changed while it was being verified: {}",
+            expected.executable
+        ));
+    }
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| format!("unable to rewind custom shell executable: {error}"))?;
+    if hash_executable(file)? != expected.sha256 {
+        return Err(format!(
+            "custom shell executable changed while it was being verified: {}",
+            expected.executable
+        ));
+    }
     Ok(())
+}
+
+fn hash_executable(file: &mut File) -> Result<String, String> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; HASH_BUFFER_BYTES];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("unable to hash custom shell executable: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let digest = hasher.finalize();
+    Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn open_executable_for_verification(executable: &str) -> Result<File, String> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    options.share_mode(FILE_SHARE_READ_ONLY);
+    options
+        .open(executable)
+        .map_err(|error| format!("unable to open custom shell executable for verification: {error}"))
+}
+
+pub(crate) fn normalize_canonical_executable(path: &Path) -> Result<String, String> {
+    let value = path.to_string_lossy();
+    let value = value.strip_prefix("\\\\?\\").unwrap_or(&value);
+    normalize_custom_executable(value)
+}
+
+fn snapshot_record(trusted: &TrustedExecutableRecord) -> TrustedExecutableSnapshot {
+    if !Path::new(&trusted.executable).exists() {
+        return TrustedExecutableSnapshot {
+            executable: trusted.executable.clone(),
+            sha256: trusted.sha256.clone(),
+            size_bytes: trusted.size_bytes,
+            status: TrustedExecutableStatus::Missing,
+            detail: Some("The executable no longer exists at the trusted path.".to_owned()),
+        };
+    }
+
+    match inspect_executable(&trusted.executable) {
+        Ok((current, _guard)) if records_match(trusted, &current) => TrustedExecutableSnapshot {
+            executable: trusted.executable.clone(),
+            sha256: trusted.sha256.clone(),
+            size_bytes: trusted.size_bytes,
+            status: TrustedExecutableStatus::Trusted,
+            detail: None,
+        },
+        Ok((_current, _guard)) => TrustedExecutableSnapshot {
+            executable: trusted.executable.clone(),
+            sha256: trusted.sha256.clone(),
+            size_bytes: trusted.size_bytes,
+            status: TrustedExecutableStatus::Changed,
+            detail: Some(
+                "The file identity changed after trust was granted. Trust it again before launch."
+                    .to_owned(),
+            ),
+        },
+        Err(error) => TrustedExecutableSnapshot {
+            executable: trusted.executable.clone(),
+            sha256: trusted.sha256.clone(),
+            size_bytes: trusted.size_bytes,
+            status: TrustedExecutableStatus::Unavailable,
+            detail: Some(error),
+        },
+    }
 }
 
 fn default_store_path() -> Result<PathBuf, String> {
@@ -217,10 +573,10 @@ fn default_store_path() -> Result<PathBuf, String> {
         .join(STORE_FILE_NAME))
 }
 
-fn load_trusted_keys(path: &Path) -> Result<BTreeSet<String>, String> {
+fn load_trusted_records(path: &Path) -> Result<BTreeMap<String, TrustedExecutableRecord>, String> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(BTreeSet::new()),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(error) => return Err(format!("unable to inspect trusted shell store: {error}")),
     };
     if metadata.len() > MAX_STORE_BYTES {
@@ -234,7 +590,10 @@ fn load_trusted_keys(path: &Path) -> Result<BTreeSet<String>, String> {
     let envelope: TrustedShellEnvelope = serde_json::from_slice(&content)
         .map_err(|error| format!("trusted shell store is invalid JSON: {error}"))?;
     if envelope.version != STORE_VERSION {
-        return Err("trusted shell store version is not supported".to_owned());
+        return Err(
+            "trusted shell store version is not supported; reset it and trust executables again"
+                .to_owned(),
+        );
     }
     if envelope.executables.len() > MAX_TRUSTED_EXECUTABLES {
         return Err(format!(
@@ -242,14 +601,30 @@ fn load_trusted_keys(path: &Path) -> Result<BTreeSet<String>, String> {
         ));
     }
 
-    envelope
-        .executables
-        .into_iter()
-        .map(|executable| trust_key(&executable))
-        .collect()
+    let mut records = BTreeMap::new();
+    for mut record in envelope.executables {
+        record.executable = normalize_custom_executable(&record.executable)?;
+        record.sha256 = record.sha256.to_ascii_lowercase();
+        if record.sha256.len() != 64
+            || !record.sha256.bytes().all(|value| value.is_ascii_hexdigit())
+        {
+            return Err("trusted shell store contains an invalid SHA-256 fingerprint".to_owned());
+        }
+        if record.size_bytes > MAX_EXECUTABLE_BYTES {
+            return Err("trusted shell store contains an oversized executable record".to_owned());
+        }
+        let key = record_key(&record.executable);
+        if records.insert(key, record).is_some() {
+            return Err("trusted shell store contains duplicate executable paths".to_owned());
+        }
+    }
+    Ok(records)
 }
 
-fn write_trusted_keys(path: &Path, executables: &BTreeSet<String>) -> Result<(), String> {
+fn write_trusted_records(
+    path: &Path,
+    records: &BTreeMap<String, TrustedExecutableRecord>,
+) -> Result<(), String> {
     let directory = path
         .parent()
         .ok_or_else(|| "trusted shell store path has no parent directory".to_owned())?;
@@ -259,10 +634,15 @@ fn write_trusted_keys(path: &Path, executables: &BTreeSet<String>) -> Result<(),
     let temporary = directory.join(format!(".{STORE_FILE_NAME}.{}.tmp", process::id()));
     let envelope = TrustedShellEnvelope {
         version: STORE_VERSION,
-        executables: executables.iter().cloned().collect(),
+        executables: records.values().cloned().collect(),
     };
     let content = serde_json::to_vec_pretty(&envelope)
         .map_err(|error| format!("unable to encode trusted shell store: {error}"))?;
+    if content.len() as u64 > MAX_STORE_BYTES {
+        return Err(format!(
+            "trusted shell store exceeds the {MAX_STORE_BYTES} byte limit"
+        ));
+    }
     fs::write(&temporary, content)
         .map_err(|error| format!("unable to write trusted shell store: {error}"))?;
 
@@ -337,24 +717,37 @@ mod tests {
     }
 
     #[test]
-    fn trust_store_persists_normalized_case_insensitive_paths() {
-        let path = temporary_store_path("persist");
-        let executable_path = temporary_executable_path("persist");
-        fs::write(&executable_path, b"test executable placeholder")
+    fn trust_store_binds_canonical_path_and_sha256_identity() {
+        let path = temporary_store_path("identity");
+        let executable_path = temporary_executable_path("identity");
+        fs::write(&executable_path, b"first executable version")
             .expect("temporary executable should be written");
         let executable = executable_path.to_string_lossy().replace('\\', "/");
-        let upper_case_executable = executable.to_ascii_uppercase();
 
-        let store = TrustedShellStore::from_path(path.clone()).expect("store should load");
+        let store = TrustedShellStore::from_path(path.clone());
         assert!(!store
             .is_trusted(&executable)
             .expect("trust query should work"));
         assert!(store.trust(&executable).expect("trust should persist"));
         assert!(store
-            .is_trusted(&upper_case_executable)
-            .expect("trust should be case insensitive"));
+            .is_trusted(&executable)
+            .expect("trusted executable should match"));
 
-        let reloaded = TrustedShellStore::from_path(path.clone()).expect("store should reload");
+        fs::write(&executable_path, b"second executable version")
+            .expect("temporary executable should be replaced");
+        assert!(!store
+            .is_trusted(&executable)
+            .expect("changed executable should be untrusted"));
+        assert_eq!(
+            store.snapshot().expect("snapshot should work").entries[0].status,
+            TrustedExecutableStatus::Changed
+        );
+        assert!(store.resolve_trusted(&executable).is_err());
+
+        assert!(store.trust(&executable).expect("re-trust should update identity"));
+        assert!(store.resolve_trusted(&executable).is_ok());
+
+        let reloaded = TrustedShellStore::from_path(path.clone());
         assert!(reloaded
             .is_trusted(&executable)
             .expect("reloaded trust should exist"));
@@ -367,26 +760,95 @@ mod tests {
         let path = temporary_store_path("missing");
         let executable_path = temporary_executable_path("missing");
         let executable = executable_path.to_string_lossy();
-        let store = TrustedShellStore::from_path(path.clone()).expect("store should load");
+        let store = TrustedShellStore::from_path(path.clone());
 
         assert!(store.trust(&executable).is_err());
         assert!(!path.exists());
     }
 
     #[test]
-    fn corrupt_or_future_stores_fail_closed() {
-        let corrupt_path = temporary_store_path("corrupt");
-        fs::write(&corrupt_path, b"{broken").expect("corrupt store should be written");
-        assert!(TrustedShellStore::from_path(corrupt_path.clone()).is_err());
-        let _ = fs::remove_file(corrupt_path);
+    fn revoke_and_clear_update_the_persisted_store() {
+        let path = temporary_store_path("revoke");
+        let first_path = temporary_executable_path("revoke-first");
+        let second_path = temporary_executable_path("revoke-second");
+        fs::write(&first_path, b"first").expect("first executable should be written");
+        fs::write(&second_path, b"second").expect("second executable should be written");
+        let first = first_path.to_string_lossy();
+        let second = second_path.to_string_lossy();
+        let store = TrustedShellStore::from_path(path.clone());
 
-        let future_path = temporary_store_path("future");
-        fs::write(
-            &future_path,
-            br#"{"version":99,"executables":["c:\\tools\\shell.exe"]}"#,
-        )
-        .expect("future store should be written");
-        assert!(TrustedShellStore::from_path(future_path.clone()).is_err());
-        let _ = fs::remove_file(future_path);
+        store.trust(&first).expect("first trust should persist");
+        store.trust(&second).expect("second trust should persist");
+        assert!(store.revoke(&first).expect("revoke should persist"));
+        assert!(!store.is_trusted(&first).expect("first should be revoked"));
+        assert!(store.is_trusted(&second).expect("second should remain trusted"));
+        assert_eq!(store.clear().expect("clear should persist"), 1);
+        assert!(store
+            .snapshot()
+            .expect("snapshot should load")
+            .entries
+            .is_empty());
+
+        let reloaded = TrustedShellStore::from_path(path.clone());
+        assert!(reloaded
+            .snapshot()
+            .expect("reloaded snapshot should work")
+            .entries
+            .is_empty());
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(first_path);
+        let _ = fs::remove_file(second_path);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verification_guard_blocks_replacement_until_launch_check_finishes() {
+        let path = temporary_store_path("guard");
+        let executable_path = temporary_executable_path("guard");
+        fs::write(&executable_path, b"guarded executable")
+            .expect("temporary executable should be written");
+        let executable = executable_path.to_string_lossy();
+        let store = TrustedShellStore::from_path(path.clone());
+        store.trust(&executable).expect("trust should persist");
+
+        let mut guard = store
+            .resolve_trusted(&executable)
+            .expect("trusted executable should resolve");
+        assert!(
+            fs::write(&executable_path, b"replacement should be blocked").is_err(),
+            "the verification handle must deny write/delete sharing"
+        );
+        guard
+            .verify_unchanged()
+            .expect("unchanged executable should pass the post-spawn check");
+        drop(guard);
+        fs::write(&executable_path, b"replacement after guard release")
+            .expect("replacement should work after guard release");
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(executable_path);
+    }
+
+    #[test]
+    fn corrupt_or_future_stores_fail_closed_and_can_be_reset() {
+        for (name, content) in [
+            ("corrupt", b"{broken".as_slice()),
+            (
+                "future",
+                br#"{"version":99,"executables":[]}"#.as_slice(),
+            ),
+        ] {
+            let path = temporary_store_path(name);
+            fs::write(&path, content).expect("invalid store should be written");
+            let store = TrustedShellStore::from_path(path.clone());
+            let snapshot = store.snapshot().expect("snapshot should report load error");
+            assert!(!snapshot.healthy);
+            assert!(store.trust(r"C:\Tools\shell.exe").is_err());
+            assert_eq!(store.clear().expect("reset should recover the store"), 0);
+            assert!(store.snapshot().expect("store should recover").healthy);
+            let reloaded = TrustedShellStore::from_path(path.clone());
+            assert!(reloaded.snapshot().expect("store should reload").healthy);
+            let _ = fs::remove_file(path);
+        }
     }
 }

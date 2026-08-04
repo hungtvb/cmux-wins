@@ -125,7 +125,7 @@ To preserve upgrades, existing workspaces and automation clients, these internal
 - Tauri application identifier: `com.hungtvb.cmuxwins`
 - Legacy workspace localStorage keys and `tonymux.workspaces.v3/v4*` migrate into the bounded `tonymux.workspaces.v5` envelope
 - Automation config: `%LOCALAPPDATA%\cmux-windows\automation-v1.json`
-- Custom executable trust store: `%LOCALAPPDATA%\cmux-windows\trusted-shells-v1.json`
+- Custom executable identity store: `%LOCALAPPDATA%\cmux-windows\trusted-shells-v2.json` (path-only v1 decisions are not migrated)
 - Named pipe prefix: `cmux-windows-v1-*`
 - Shell override: `CMUX_SHELL`
 
