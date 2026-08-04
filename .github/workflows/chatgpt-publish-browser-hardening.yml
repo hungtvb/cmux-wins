@@ -1,0 +1,51 @@
+name: ChatGPT Publish Browser Hardening
+
+on:
+  pull_request:
+    branches:
+      - feat/custom-shell-trust-lifecycle
+    paths:
+      - .github/workflows/chatgpt-publish-browser-hardening.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Publish verified product commit
+        shell: bash
+        env:
+          BASE_SHA: 8fe5c7b2efb3199e40842044d7e37b1a6ca62826
+          EXPECTED_PATCH_SHA: bc7fcd966fd56b1633b9353cb53f222f2dbc33ea6376f80dc7cdd199d471990b
+          EXPECTED_TREE: 06e54ce094a88c4374abd189415bbd13f3f7e612
+          TARGET_BRANCH: feat/browser-pane-hardening
+        run: |
+          set -euo pipefail
+
+          patch="$RUNNER_TEMP/browser-hardening.patch"
+          cat .chatgpt/browser-hardening.part-* | base64 --decode > "$patch"
+
+          actual_patch_sha="$(sha256sum "$patch" | awk '{print $1}')"
+          test "$actual_patch_sha" = "$EXPECTED_PATCH_SHA"
+
+          git checkout --detach "$BASE_SHA"
+          git config user.name "hungtvb"
+          git config user.email "69663872+hungtvb@users.noreply.github.com"
+          git am "$patch"
+
+          test "$(git rev-parse HEAD^{tree})" = "$EXPECTED_TREE"
+          test -z "$(git status --porcelain)"
+          test ! -e .chatgpt
+          test ! -e .github/workflows/chatgpt-publish-browser-hardening.yml
+
+          git push --force origin "HEAD:refs/heads/$TARGET_BRANCH"
