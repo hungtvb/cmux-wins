@@ -5,7 +5,7 @@
   height: 100%;
   min-width: 0;
   min-height: 240px;
-  grid-template-rows: 35px 41px minmax(0, 1fr);
+  grid-template-rows: 35px 41px auto minmax(0, 1fr);
   background: #0a0d12;
   isolation: isolate;
 }
@@ -51,6 +51,100 @@
   box-shadow: 0 0 0 2px rgba(94, 120, 184, 0.17);
 }
 
+.browser-pane__loading {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: #88a8ff;
+}
+
+.browser-pane__loading > svg {
+  animation: browser-pane-spin 800ms linear infinite;
+}
+
+.browser-pane__feedback {
+  display: grid;
+  min-width: 0;
+  min-height: 31px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px 5px 10px;
+  border-bottom: 1px solid rgba(125, 156, 255, 0.14);
+  background: #111722;
+  color: #b8c3d4;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.browser-pane__feedback > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-pane__feedback--notice {
+  border-bottom-color: rgba(231, 190, 92, 0.2);
+  background: #18170f;
+  color: #d6c58e;
+}
+
+.browser-pane__feedback--notice > svg {
+  color: #d9b85c;
+}
+
+.browser-pane__feedback--error {
+  border-bottom-color: rgba(233, 115, 126, 0.24);
+  background: #1a1115;
+  color: #edb0b7;
+}
+
+.browser-pane__feedback--error > svg {
+  color: #f08a98;
+}
+
+.browser-pane__feedback button {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid rgba(143, 170, 255, 0.25);
+  border-radius: 6px;
+  background: rgba(125, 156, 255, 0.08);
+  color: #a9bdff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.browser-pane__feedback button:hover {
+  border-color: rgba(143, 170, 255, 0.45);
+  background: rgba(125, 156, 255, 0.14);
+}
+
+.browser-pane__feedback button:focus-visible {
+  outline: 2px solid #7d9cff;
+  outline-offset: 1px;
+}
+
+.browser-pane__feedback .browser-pane__feedback-dismiss {
+  width: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: currentColor;
+  opacity: 0.7;
+}
+
+.browser-pane__feedback .browser-pane__feedback-dismiss:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  opacity: 1;
+}
+
 .browser-pane__host {
   position: relative;
   min-width: 0;
@@ -72,6 +166,14 @@
   text-align: center;
 }
 
-.browser-pane__status--error {
-  color: #f0a3a3;
+@keyframes browser-pane-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-pane__loading > svg {
+    animation: none;
+  }
 }

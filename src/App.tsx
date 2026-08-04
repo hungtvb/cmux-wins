@@ -545,6 +545,7 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
                         focused={focused}
                         onFocus={focusPane}
                         onUrlChange={handleBrowserUrlChange}
+                        onTitleChange={handleTitleChange}
                         onClose={closePane}
                       />
                     ) : (
