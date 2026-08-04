@@ -408,6 +408,7 @@ function BrowserPaneComponent({
   return (
     <section
       className={`browser-pane${focused ? " browser-pane--focused" : ""}`}
+      aria-label={`Browser pane: ${title}`}
       aria-busy={loading}
       onFocusCapture={onFocus}
       onPointerDown={onFocus}
@@ -441,6 +442,7 @@ function BrowserPaneComponent({
           type="button"
           title="Back"
           aria-label="Back"
+          disabled={!nativeReady}
           onClick={() => runBrowserAction("browser_go_back")}
         >
           <ArrowLeft size={15} />
@@ -450,6 +452,7 @@ function BrowserPaneComponent({
           type="button"
           title="Forward"
           aria-label="Forward"
+          disabled={!nativeReady}
           onClick={() => runBrowserAction("browser_go_forward")}
         >
           <ArrowRight size={15} />
@@ -459,11 +462,16 @@ function BrowserPaneComponent({
           type="button"
           title="Reload"
           aria-label="Reload"
+          disabled={!nativeReady}
           onClick={() => runBrowserAction("reload_browser_pane")}
         >
           <RefreshCw size={14} />
         </button>
         <input
+          type="text"
+          inputMode="url"
+          autoCapitalize="none"
+          autoComplete="off"
           aria-label="Browser address"
           aria-describedby={feedback ? feedbackId : undefined}
           value={draftUrl}
@@ -512,7 +520,7 @@ function BrowserPaneComponent({
 
       <div className="browser-pane__host" ref={hostRef}>
         {!nativeReady && (
-          <div className="browser-pane__status">
+          <div className="browser-pane__status" role="status" aria-live="polite">
             {loading ? "Starting WebView2 browser surface…" : "WebView2 browser surface"}
           </div>
         )}

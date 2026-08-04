@@ -23,8 +23,10 @@
 
   --tm-success: #66c997;
   --tm-warning: #e4b86a;
+  --tm-warning-soft: rgba(228, 184, 106, 0.1);
   --tm-danger: #ef8292;
   --tm-danger-strong: #ffc2cb;
+  --tm-danger-soft: rgba(239, 130, 146, 0.1);
   --tm-attention: #b9a0ff;
   --tm-attention-soft: rgba(185, 160, 255, 0.12);
 
@@ -719,7 +721,7 @@ input:focus-visible {
   min-width: 0;
   min-height: 240px;
   grid-template-rows: 32px minmax(0, 1fr);
-  background: #090c11;
+  background: var(--tm-canvas);
   isolation: isolate;
 }
 
@@ -732,10 +734,8 @@ input:focus-visible {
   min-width: 0;
   min-height: 0;
   grid-template-rows: 28px minmax(0, 1fr) 31px;
-  border-bottom: 1px solid rgba(128, 164, 255, 0.24);
-  background:
-    linear-gradient(180deg, rgba(128, 164, 255, 0.05), transparent 46%),
-    #0c1017;
+  border-bottom: 1px solid rgba(114, 167, 255, 0.28);
+  background: var(--tm-surface-0);
 }
 
 .terminal-pane__history-heading,
@@ -745,23 +745,23 @@ input:focus-visible {
   align-items: center;
   gap: 7px;
   padding: 0 11px;
-  color: #8f99aa;
+  color: var(--tm-text-muted);
   font-size: 9px;
   letter-spacing: 0.02em;
 }
 
 .terminal-pane__history-heading {
-  border-bottom: 1px solid rgba(128, 164, 255, 0.1);
+  border-bottom: 1px solid var(--tm-border-subtle);
 }
 
 .terminal-pane__history-heading > svg {
   flex: 0 0 auto;
-  color: #8daaff;
+  color: var(--tm-focus);
 }
 
 .terminal-pane__history-heading > span:first-of-type {
   overflow: hidden;
-  color: #aab5c8;
+  color: var(--tm-text);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -769,7 +769,7 @@ input:focus-visible {
 
 .terminal-pane__history-heading > span:last-of-type {
   margin-left: auto;
-  color: #748095;
+  color: var(--tm-text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -780,7 +780,7 @@ input:focus-visible {
   margin: 0;
   padding: 8px 11px;
   overflow: auto;
-  color: #8e99aa;
+  color: var(--tm-text-muted);
   font-family: var(
     --restored-history-font-family,
     "Cascadia Code", "Cascadia Mono", Consolas, monospace
@@ -794,25 +794,25 @@ input:focus-visible {
 }
 
 .terminal-pane__restored-history pre:focus-visible {
-  outline: 1px solid rgba(128, 164, 255, 0.72);
+  outline: 1px solid var(--tm-focus-ring);
   outline-offset: -2px;
 }
 
 .terminal-pane__history-divider {
   justify-content: space-between;
-  border-top: 1px solid rgba(128, 164, 255, 0.18);
-  background: rgba(128, 164, 255, 0.07);
+  border-top: 1px solid var(--tm-border-default);
+  background: var(--tm-focus-soft);
   text-transform: uppercase;
 }
 
 .terminal-pane__history-divider span {
-  color: #748095;
+  color: var(--tm-text-muted);
   font-size: 8px;
   letter-spacing: 0.08em;
 }
 
 .terminal-pane__history-divider strong {
-  color: #a7bbff;
+  color: var(--tm-focus);
   font-size: 8px;
   letter-spacing: 0.1em;
 }
@@ -857,6 +857,10 @@ input:focus-visible {
   background: var(--tm-focus-soft);
 }
 
+.terminal-pane--attention .terminal-pane__header {
+  background: var(--tm-attention-soft);
+}
+
 .terminal-pane__title,
 .browser-pane__title {
   display: flex;
@@ -873,6 +877,10 @@ input:focus-visible {
   color: var(--tm-focus);
 }
 
+.terminal-pane--attention .terminal-pane__title > svg {
+  color: var(--tm-attention);
+}
+
 .terminal-pane__title > span:first-of-type,
 .browser-pane__title > span:first-of-type {
   overflow: hidden;
@@ -880,7 +888,8 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-.pane-focus-label {
+.pane-focus-label,
+.pane-attention-label {
   flex: 0 0 auto;
   padding: 2px 5px;
   border: 1px solid rgba(114, 167, 255, 0.28);
@@ -891,6 +900,12 @@ input:focus-visible {
   font-weight: 750;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.pane-attention-label {
+  border-color: rgba(185, 160, 255, 0.34);
+  background: var(--tm-attention-soft);
+  color: var(--tm-attention);
 }
 
 .terminal-pane__host {

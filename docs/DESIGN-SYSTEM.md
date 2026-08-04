@@ -86,7 +86,9 @@ These are target tokens. Existing CSS variables may migrate incrementally, but n
 
   --tm-success: #66c997;
   --tm-warning: #e4b86a;
+  --tm-warning-soft: rgba(228, 184, 106, 0.10);
   --tm-danger: #ef8292;
+  --tm-danger-soft: rgba(239, 130, 146, 0.10);
   --tm-danger-strong: #ffc2cb;
   --tm-attention: #b9a0ff;
   --tm-attention-soft: rgba(185, 160, 255, 0.12);
