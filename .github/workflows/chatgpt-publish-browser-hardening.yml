@@ -22,6 +22,98 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Recover the exact corrupted chunk
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BAD_BLOB: 39425e7c71baf8b5eb46c10b534cb6656fc9ce26
+          EXPECTED_BLOB: 33362dd8f8898b266ac2231f2033b8d5abf6e34e
+          EXPECTED_LENGTH: 16000
+        run: |
+          set -euo pipefail
+
+          bad="$RUNNER_TEMP/browser-hardening.part-02.bad"
+          repaired="$RUNNER_TEMP/browser-hardening.part-02"
+
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/blobs/$BAD_BLOB" \
+            | jq --raw-output '.content' \
+            | tr -d '\n' \
+            | base64 --decode > "$bad"
+
+          python - "$bad" "$repaired" "$EXPECTED_BLOB" "$EXPECTED_LENGTH" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+
+          bad_path = pathlib.Path(sys.argv[1])
+          repaired_path = pathlib.Path(sys.argv[2])
+          expected_sha = sys.argv[3]
+          expected_length = int(sys.argv[4])
+          bad = bad_path.read_bytes()
+          alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/="
+
+          def blob_sha(value: bytes) -> str:
+              return hashlib.sha1(f"blob {len(value)}\0".encode() + value).hexdigest()
+
+          print(f"bad chunk length={len(bad)} sha={blob_sha(bad)}")
+          result = None
+
+          if blob_sha(bad) == expected_sha:
+              result = bad
+          elif len(bad) == expected_length:
+              header = f"blob {expected_length}\0".encode()
+              for index, old in enumerate(bad):
+                  prefix = hashlib.sha1(header + bad[:index])
+                  suffix = bad[index + 1:]
+                  for replacement in alphabet:
+                      if replacement == old:
+                          continue
+                      candidate_hash = prefix.copy()
+                      candidate_hash.update(bytes((replacement,)))
+                      candidate_hash.update(suffix)
+                      if candidate_hash.hexdigest() == expected_sha:
+                          result = bad[:index] + bytes((replacement,)) + suffix
+                          print(f"recovered by substitution at index {index}")
+                          break
+                  if result is not None:
+                      break
+              if result is None:
+                  for index in range(len(bad) - 1):
+                      if bad[index] == bad[index + 1]:
+                          continue
+                      candidate = bad[:index] + bad[index + 1:index + 2] + bad[index:index + 1] + bad[index + 2:]
+                      if blob_sha(candidate) == expected_sha:
+                          result = candidate
+                          print(f"recovered by adjacent transposition at index {index}")
+                          break
+          elif len(bad) == expected_length + 1:
+              for index in range(len(bad)):
+                  candidate = bad[:index] + bad[index + 1:]
+                  if blob_sha(candidate) == expected_sha:
+                      result = candidate
+                      print(f"recovered by deletion at index {index}")
+                      break
+          elif len(bad) == expected_length - 1:
+              for index in range(len(bad) + 1):
+                  for insertion in alphabet:
+                      candidate = bad[:index] + bytes((insertion,)) + bad[index:]
+                      if blob_sha(candidate) == expected_sha:
+                          result = candidate
+                          print(f"recovered by insertion at index {index}")
+                          break
+                  if result is not None:
+                      break
+
+          if result is None or blob_sha(result) != expected_sha:
+              raise SystemExit("unable to recover expected chunk with one base64 edit")
+
+          repaired_path.write_bytes(result)
+          print(f"repaired chunk length={len(result)} sha={blob_sha(result)}")
+          PY
+
       - name: Publish verified product commit
         shell: bash
         env:
@@ -33,7 +125,12 @@ jobs:
           set -euo pipefail
 
           patch="$RUNNER_TEMP/browser-hardening.patch"
-          cat .chatgpt/browser-hardening.part-* | base64 --decode > "$patch"
+          cat \
+            .chatgpt/browser-hardening.part-00 \
+            .chatgpt/browser-hardening.part-01 \
+            "$RUNNER_TEMP/browser-hardening.part-02" \
+            .chatgpt/browser-hardening.part-03 \
+            | base64 --decode > "$patch"
 
           actual_patch_sha="$(sha256sum "$patch" | awk '{print $1}')"
           test "$actual_patch_sha" = "$EXPECTED_PATCH_SHA"
