@@ -49,7 +49,7 @@ function TerminalPaneComponent({
     : 0;
   const restoredHistoryStyle = {
     "--restored-history-font-family":
-      paneSettings?.appearance.fontFamily ?? '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
+      paneSettings?.appearance.fontFamily ?? '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
     "--restored-history-font-size": `${paneSettings?.appearance.fontSize ?? 13}px`,
     "--restored-history-line-height": paneSettings?.appearance.lineHeight ?? 1.25,
   } as CSSProperties;

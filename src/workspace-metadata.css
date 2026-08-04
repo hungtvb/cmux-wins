@@ -28,7 +28,7 @@
 }
 
 .workspace-item__metadata > span:first-child {
-  color: var(--tm-focus);
+  color: var(--tm-text);
 }
 
 .workspace-item--active .workspace-item__metadata > span {

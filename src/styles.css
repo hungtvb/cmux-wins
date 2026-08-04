@@ -1,41 +1,60 @@
 :root {
-  --tm-canvas: #0a0d12;
-  --tm-surface-0: #0e1218;
-  --tm-surface-1: #121821;
-  --tm-surface-2: #18202b;
-  --tm-surface-3: #202a37;
-  --tm-hover: #1b2531;
+  color-scheme: dark;
 
-  --tm-border-subtle: #222b36;
-  --tm-border-default: #2d3846;
-  --tm-border-strong: #425166;
+  /* Tony shared foundations: warm neutrals, Lime brand, blue keyboard focus. */
+  --tm-canvas: #10100f;
+  --tm-surface-0: #151513;
+  --tm-surface-1: #191917;
+  --tm-surface-2: #222220;
+  --tm-surface-3: #282825;
+  --tm-hover: #2d2d2a;
 
-  --tm-text-strong: #f1f4f8;
-  --tm-text: #c7cfda;
-  --tm-text-muted: #8792a2;
-  --tm-text-faint: #626d7c;
+  --tm-border-subtle: #2d2d2a;
+  --tm-border-default: #3d3d39;
+  --tm-border-strong: #5f5f59;
 
-  --tm-focus: #72a7ff;
-  --tm-focus-soft: rgba(114, 167, 255, 0.12);
-  --tm-focus-ring: rgba(114, 167, 255, 0.78);
-  --tm-focus-fill: #376abc;
-  --tm-focus-fill-hover: #3f72c8;
+  --tm-text-strong: #f5f5f4;
+  --tm-text: #c6c6c1;
+  --tm-text-muted: #a4a49f;
+  --tm-text-faint: #73736e;
 
-  --tm-success: #66c997;
-  --tm-warning: #e4b86a;
-  --tm-warning-soft: rgba(228, 184, 106, 0.1);
-  --tm-danger: #ef8292;
+  --tm-brand: #d4ff40;
+  --tm-brand-strong: #e3ff8a;
+  --tm-on-brand: #101204;
+  --tm-brand-soft: rgba(212, 255, 64, 0.1);
+  --tm-brand-soft-strong: rgba(212, 255, 64, 0.16);
+  --tm-brand-border: rgba(212, 255, 64, 0.36);
+
+  --tm-focus: #7aa7ff;
+  --tm-focus-soft: rgba(122, 167, 255, 0.12);
+  --tm-focus-ring: rgba(122, 167, 255, 0.88);
+
+  --tm-info: #7aa7ff;
+  --tm-info-soft: rgba(122, 167, 255, 0.1);
+  --tm-info-border: rgba(122, 167, 255, 0.34);
+  --tm-success: #86d9a5;
+  --tm-success-soft: rgba(22, 128, 58, 0.16);
+  --tm-success-border: rgba(134, 217, 165, 0.32);
+  --tm-warning: #f1bd72;
+  --tm-warning-soft: rgba(182, 92, 0, 0.16);
+  --tm-warning-border: rgba(241, 189, 114, 0.34);
+  --tm-danger: #ff9aa8;
   --tm-danger-strong: #ffc2cb;
-  --tm-danger-soft: rgba(239, 130, 146, 0.1);
-  --tm-attention: #b9a0ff;
-  --tm-attention-soft: rgba(185, 160, 255, 0.12);
+  --tm-danger-soft: rgba(209, 36, 47, 0.16);
+  --tm-danger-soft-hover: rgba(209, 36, 47, 0.24);
+  --tm-danger-border: rgba(255, 154, 168, 0.36);
 
-  --tm-font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --tm-font-mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+  --tm-font-ui: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --tm-font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
 
-  --tm-motion-fast: 100ms;
-  --tm-motion-standard: 150ms;
-  --tm-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --tm-motion-fast: 120ms;
+  --tm-motion-standard: 180ms;
+  --tm-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --tm-shadow-popover: 0 18px 44px rgba(0, 0, 0, 0.42);
+  --tm-shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.5);
+  --tm-scrim: rgba(8, 8, 7, 0.68);
 
   --tm-z-settings: 90;
   --tm-z-command-palette: 100;
@@ -46,7 +65,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 
-  /* Compatibility aliases while feature styles migrate to --tm-* tokens. */
+  /* Compatibility aliases while component styles migrate to semantic tokens. */
   --app-bg: var(--tm-canvas);
   --surface-0: var(--tm-surface-0);
   --surface-1: var(--tm-surface-1);
@@ -57,13 +76,14 @@
   --text-primary: var(--tm-text-strong);
   --text-secondary: var(--tm-text);
   --text-muted: var(--tm-text-muted);
-  --accent: var(--tm-focus);
-  --accent-strong: #a8c5ff;
-  --accent-soft: var(--tm-focus-soft);
+  --accent: var(--tm-brand);
+  --accent-strong: var(--tm-brand-strong);
+  --accent-soft: var(--tm-brand-soft);
   --danger: var(--tm-danger);
   --warning: var(--tm-warning);
   --success: var(--tm-success);
 }
+
 
 * {
   box-sizing: border-box;
@@ -137,10 +157,10 @@ input:focus-visible {
 
 .sidebar__brand {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 11px;
-  min-height: 54px;
+  gap: 10px;
+  min-height: 56px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-subtle);
 }
@@ -156,13 +176,13 @@ input:focus-visible {
   color: var(--text-primary);
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.012em;
 }
 
 .sidebar__brand-copy span {
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -180,13 +200,13 @@ input:focus-visible {
 
 .sidebar__logo {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   place-items: center;
-  border: 1px solid var(--tm-border-strong);
+  border: 1px solid var(--tm-brand-border);
   border-radius: 8px;
-  background: var(--tm-surface-2);
-  color: var(--tm-focus);
+  background: var(--tm-brand-soft);
+  color: var(--tm-brand);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
@@ -201,7 +221,7 @@ input:focus-visible {
   color: var(--tm-text-muted);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -226,7 +246,7 @@ input:focus-visible {
 
 .sidebar__add-button {
   display: inline-flex;
-  height: 28px;
+  height: 32px;
   align-items: center;
   gap: 5px;
   padding: 0 8px;
@@ -234,7 +254,7 @@ input:focus-visible {
   border-radius: 6px;
   background: var(--tm-surface-1);
   color: var(--tm-text-muted);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 650;
   letter-spacing: 0;
   text-transform: none;
@@ -265,7 +285,7 @@ input:focus-visible {
   align-items: start;
   gap: 8px;
   width: 100%;
-  min-height: 64px;
+  min-height: 68px;
   padding: 10px 34px 10px 9px;
   border: 1px solid transparent;
   border-radius: 8px;
@@ -286,10 +306,10 @@ input:focus-visible {
 }
 
 .workspace-item--active {
-  border-color: var(--tm-border-default);
-  background: var(--tm-focus-soft);
+  border-color: var(--tm-brand-border);
+  background: var(--tm-brand-soft);
   color: var(--text-primary);
-  box-shadow: inset 2px 0 var(--tm-focus);
+  box-shadow: inset 2px 0 var(--tm-brand);
 }
 
 .workspace-item__shortcut {
@@ -309,7 +329,7 @@ input:focus-visible {
 }
 
 .workspace-item--active .workspace-item__icon {
-  color: var(--tm-focus);
+  color: var(--tm-brand);
 }
 
 .workspace-item__dirty {
@@ -348,13 +368,13 @@ input:focus-visible {
 
 .workspace-item__body strong {
   color: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 650;
 }
 
 .workspace-item__body small {
   color: var(--tm-text-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.25;
 }
 
@@ -365,7 +385,7 @@ input:focus-visible {
   gap: 4px;
   color: var(--tm-text-muted);
   font-family: var(--tm-font-mono);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .workspace-item__branch svg {
@@ -374,7 +394,7 @@ input:focus-visible {
 
 .workspace-item__alert {
   flex: 0 0 auto;
-  color: var(--tm-attention);
+  color: var(--tm-brand);
 }
 
 .sidebar__footer {
@@ -386,7 +406,7 @@ input:focus-visible {
   padding: 0 12px;
   border-top: 1px solid var(--border-subtle);
   color: var(--tm-text-muted);
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .sidebar__host-status {
@@ -418,7 +438,7 @@ input:focus-visible {
 .workspace {
   display: grid;
   min-width: 0;
-  grid-template-rows: 54px minmax(0, 1fr);
+  grid-template-rows: 56px minmax(0, 1fr);
 }
 
 .topbar {
@@ -468,8 +488,8 @@ input:focus-visible {
   margin: 0;
   overflow: hidden;
   color: var(--tm-text-strong);
-  font-size: 13px;
-  font-weight: 680;
+  font-size: 14px;
+  font-weight: 650;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -482,10 +502,10 @@ input:focus-visible {
   align-items: center;
   gap: 5px;
   padding: 0 6px;
-  border: 1px solid #284237;
+  border: 1px solid var(--tm-success-border);
   border-radius: 4px;
-  background: rgba(55, 113, 82, 0.12);
-  color: #84cba2;
+  background: var(--tm-success-soft);
+  color: var(--tm-success);
   font-size: 8px;
   font-weight: 650;
 }
@@ -498,9 +518,9 @@ input:focus-visible {
 }
 
 .workspace-state--dirty {
-  border-color: #50402b;
-  background: rgba(154, 111, 47, 0.12);
-  color: #e6bc71;
+  border-color: var(--tm-warning-border);
+  background: var(--tm-warning-soft);
+  color: var(--tm-warning);
 }
 
 .topbar__context {
@@ -512,7 +532,7 @@ input:focus-visible {
   overflow: hidden;
   color: var(--tm-text-muted);
   font-family: var(--tm-font-mono);
-  font-size: 9px;
+  font-size: 10px;
   white-space: nowrap;
 }
 
@@ -562,8 +582,8 @@ input:focus-visible {
 }
 
 .icon-button {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 7px;
   color: var(--tm-text-muted);
 }
@@ -575,14 +595,14 @@ input:focus-visible {
 }
 
 .toolbar-button {
-  height: 30px;
+  height: 32px;
   gap: 7px;
   padding: 0 10px;
   border-color: var(--tm-border-default);
   border-radius: 6px;
   background: var(--tm-surface-1);
   color: var(--tm-text);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 580;
   white-space: nowrap;
 }
@@ -605,26 +625,27 @@ input:focus-visible {
 }
 
 .toolbar-button--primary {
-  border-color: var(--tm-border-strong);
-  background: var(--tm-focus-soft);
-  color: #dbe8ff;
+  border-color: var(--tm-brand);
+  background: var(--tm-brand);
+  color: var(--tm-on-brand);
 }
 
 .toolbar-button--primary:hover {
-  border-color: var(--tm-focus);
-  background: rgba(114, 167, 255, 0.18);
+  border-color: var(--tm-brand-strong);
+  background: var(--tm-brand-strong);
+  color: var(--tm-on-brand);
 }
 
 .toolbar-button--compact {
-  width: 30px;
+  width: 32px;
   padding: 0;
   border-color: transparent;
   background: transparent;
 }
 
 .toolbar-button--attention {
-  color: var(--tm-attention);
-  background: var(--tm-attention-soft);
+  color: var(--tm-brand);
+  background: var(--tm-brand-soft-strong);
 }
 
 .toolbar-button__badge {
@@ -638,8 +659,8 @@ input:focus-visible {
   place-items: center;
   border: 2px solid var(--tm-surface-0);
   border-radius: 999px;
-  background: var(--tm-attention);
-  color: white;
+  background: var(--tm-brand);
+  color: var(--tm-on-brand);
   font-size: 8px;
   line-height: 1;
 }
@@ -671,7 +692,7 @@ input:focus-visible {
   border: 1px solid var(--tm-border-default);
   border-radius: 8px;
   background: var(--tm-surface-1);
-  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--tm-shadow-popover);
 }
 
 .action-menu__label {
@@ -695,7 +716,7 @@ input:focus-visible {
   border-radius: 7px;
   background: transparent;
   color: var(--tm-text);
-  font-size: 10px;
+  font-size: 11px;
   text-align: left;
   cursor: pointer;
 }
@@ -734,7 +755,7 @@ input:focus-visible {
   min-width: 0;
   min-height: 0;
   grid-template-rows: 28px minmax(0, 1fr) 31px;
-  border-bottom: 1px solid rgba(114, 167, 255, 0.28);
+  border-bottom: 1px solid var(--tm-info-border);
   background: var(--tm-surface-0);
 }
 
@@ -783,7 +804,7 @@ input:focus-visible {
   color: var(--tm-text-muted);
   font-family: var(
     --restored-history-font-family,
-    "Cascadia Code", "Cascadia Mono", Consolas, monospace
+    "JetBrains Mono", "SFMono-Regular", Consolas, monospace
   );
   font-size: var(--restored-history-font-size, 13px);
   line-height: var(--restored-history-line-height, 1.25);
@@ -801,7 +822,7 @@ input:focus-visible {
 .terminal-pane__history-divider {
   justify-content: space-between;
   border-top: 1px solid var(--tm-border-default);
-  background: var(--tm-focus-soft);
+  background: var(--tm-info-soft);
   text-transform: uppercase;
 }
 
@@ -812,7 +833,7 @@ input:focus-visible {
 }
 
 .terminal-pane__history-divider strong {
-  color: var(--tm-focus);
+  color: var(--tm-info);
   font-size: 8px;
   letter-spacing: 0.1em;
 }
@@ -832,13 +853,18 @@ input:focus-visible {
 
 .terminal-pane--focused::after,
 .browser-pane--focused::after {
-  border-color: var(--tm-focus-ring);
-  box-shadow: inset 0 0 0 1px var(--tm-focus-soft);
+  border-color: var(--tm-brand);
+  box-shadow: inset 0 2px var(--tm-brand);
 }
 
 .terminal-pane--attention::after {
-  border-color: var(--tm-attention);
-  box-shadow: inset 0 0 0 1px rgba(185, 160, 255, 0.22);
+  border-color: var(--tm-brand-border);
+  box-shadow: inset 3px 0 var(--tm-brand);
+}
+
+.terminal-pane--focused.terminal-pane--attention::after {
+  border-color: var(--tm-brand);
+  box-shadow: inset 0 2px var(--tm-brand), inset 3px 0 var(--tm-brand);
 }
 
 .terminal-pane__header,
@@ -854,11 +880,11 @@ input:focus-visible {
 
 .terminal-pane--focused .terminal-pane__header,
 .browser-pane--focused .browser-pane__header {
-  background: var(--tm-focus-soft);
+  background: var(--tm-brand-soft);
 }
 
 .terminal-pane--attention .terminal-pane__header {
-  background: var(--tm-attention-soft);
+  background: var(--tm-brand-soft-strong);
 }
 
 .terminal-pane__title,
@@ -868,17 +894,22 @@ input:focus-visible {
   align-items: center;
   gap: 7px;
   color: var(--tm-text-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .terminal-pane__title > svg,
 .browser-pane__title > svg {
   flex: 0 0 auto;
-  color: var(--tm-focus);
+  color: var(--tm-text-muted);
+}
+
+.terminal-pane--focused .terminal-pane__title > svg,
+.browser-pane--focused .browser-pane__title > svg {
+  color: var(--tm-brand);
 }
 
 .terminal-pane--attention .terminal-pane__title > svg {
-  color: var(--tm-attention);
+  color: var(--tm-brand-strong);
 }
 
 .terminal-pane__title > span:first-of-type,
@@ -892,10 +923,10 @@ input:focus-visible {
 .pane-attention-label {
   flex: 0 0 auto;
   padding: 2px 5px;
-  border: 1px solid rgba(114, 167, 255, 0.28);
+  border: 1px solid var(--tm-brand-border);
   border-radius: 4px;
-  background: var(--tm-focus-soft);
-  color: var(--tm-focus);
+  background: var(--tm-brand-soft);
+  color: var(--tm-brand);
   font-size: 7px;
   font-weight: 750;
   letter-spacing: 0.08em;
@@ -903,9 +934,9 @@ input:focus-visible {
 }
 
 .pane-attention-label {
-  border-color: rgba(185, 160, 255, 0.34);
-  background: var(--tm-attention-soft);
-  color: var(--tm-attention);
+  border-color: var(--tm-brand-border);
+  background: var(--tm-brand-soft-strong);
+  color: var(--tm-brand-strong);
 }
 
 .terminal-pane__host {
@@ -978,10 +1009,10 @@ input:focus-visible {
   overflow: hidden;
   max-width: 148px;
   padding: 2px 6px;
-  border: 1px solid rgba(128, 164, 255, 0.28);
-  border-radius: 999px;
-  background: rgba(128, 164, 255, 0.08);
-  color: #9cb8ff;
+  border: 1px solid var(--tm-info-border);
+  border-radius: 4px;
+  background: var(--tm-info-soft);
+  color: var(--tm-info);
   font-size: 9px;
   font-weight: 650;
   text-overflow: ellipsis;

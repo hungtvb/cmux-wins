@@ -101,7 +101,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultWorkingDirectory: "",
   startupCommand: "",
   terminal: {
-    fontFamily: '"Cascadia Code", "Cascadia Mono", Consolas, monospace',
+    fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.25,
     cursorStyle: "bar",
