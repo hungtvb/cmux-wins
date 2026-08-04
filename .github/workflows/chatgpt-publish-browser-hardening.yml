@@ -48,7 +48,7 @@ jobs:
           cat .chatgpt/browser-delta.part-* | base64 --decode > "$delta"
           test "$(sha256sum "$delta" | awk '{print $1}')" = "$EXPECTED_DELTA_SHA"
 
-          zstd --decompress --patch-from="$bad" "$delta" --output "$repaired" --force
+          zstd --decompress --patch-from="$bad" "$delta" -o "$repaired" --force
           test "$(wc -c < "$repaired" | tr -d ' ')" = "$EXPECTED_CHUNK_SIZE"
           test "$(git hash-object "$repaired")" = "$EXPECTED_CHUNK_BLOB"
 
