@@ -5,6 +5,7 @@ import {
   LEGACY_SETTINGS_STORAGE_KEYS,
   SETTINGS_STORAGE_KEY,
   SETTINGS_VERSION,
+  countCustomShellProfilesUsingExecutable,
   exportSettings,
   importSettings,
   loadSettings,
@@ -94,7 +95,6 @@ describe("settings schema", () => {
     ).toBe(5_000);
   });
 
-
   it("migrates settings v3 to versioned shortcut defaults", () => {
     const migrated = normalizeSettings({
       version: 3,
@@ -140,7 +140,7 @@ describe("settings schema", () => {
     });
   });
 
-  it("rejects unsafe custom executable paths and duplicate executables", () => {
+  it("rejects unsafe custom executable paths and allows shared trusted paths", () => {
     expect(validateCustomShellExecutable("shell.exe")).toMatch(/absolute local Windows path/);
     expect(validateCustomShellExecutable("C:\\Tools\\shell.exe --flag")).toMatch(
       /cannot include arguments/,
@@ -151,7 +151,7 @@ describe("settings schema", () => {
     );
     expect(normalizeCustomShellExecutable("C:\\Tools\\shell.exe\n")).toBe("");
 
-    const errors = validateSettings({
+    const shared = {
       ...DEFAULT_SETTINGS,
       defaultShellProfileId: "custom:profile_one",
       customShellProfiles: [
@@ -166,8 +166,17 @@ describe("settings schema", () => {
           executable: "c:/tools/shell.exe",
         },
       ],
-    });
-    expect(errors).toContain("Two uses the same executable as One.");
+    };
+    expect(validateSettings(shared)).toEqual([]);
+    expect(normalizeSettings(shared).customShellProfiles).toHaveLength(2);
+    expect(countCustomShellProfilesUsingExecutable(shared, "C:\\TOOLS\\shell.exe")).toBe(2);
+    expect(
+      countCustomShellProfilesUsingExecutable(
+        shared,
+        "C:\\Tools\\Shell.exe",
+        "custom:profile_one",
+      ),
+    ).toBe(1);
   });
 
   it("falls back when a selected custom profile is missing or malformed", () => {

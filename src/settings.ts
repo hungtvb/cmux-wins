@@ -187,7 +187,6 @@ function normalizeCustomShellProfiles(value: unknown): CustomShellProfile[] {
 
   const profiles: CustomShellProfile[] = [];
   const usedIds = new Set<string>();
-  const usedExecutables = new Set<string>();
 
   for (const candidateValue of value.slice(0, MAX_CUSTOM_SHELL_PROFILES)) {
     if (!candidateValue || typeof candidateValue !== "object") continue;
@@ -195,20 +194,17 @@ function normalizeCustomShellProfiles(value: unknown): CustomShellProfile[] {
     const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
     const label = safeString(candidate.label, "", MAX_CUSTOM_SHELL_LABEL_LENGTH).trim();
     const executable = normalizeCustomShellExecutable(candidate.executable);
-    const executableKey = executable.toLocaleLowerCase("en-US");
 
     if (
       !CUSTOM_SHELL_PROFILE_ID_PATTERN.test(id) ||
       !label ||
       !executable ||
-      usedIds.has(id) ||
-      usedExecutables.has(executableKey)
+      usedIds.has(id)
     ) {
       continue;
     }
 
     usedIds.add(id);
-    usedExecutables.add(executableKey);
     profiles.push({ id, label, executable });
   }
 
@@ -220,6 +216,20 @@ export function findCustomShellProfile(
   profileId: string,
 ): CustomShellProfile | undefined {
   return settings.customShellProfiles.find((profile) => profile.id === profileId);
+}
+
+export function countCustomShellProfilesUsingExecutable(
+  settings: Pick<AppSettings, "customShellProfiles">,
+  executable: string,
+  excludeProfileId?: string,
+): number {
+  const key = normalizeCustomShellExecutable(executable).toLocaleLowerCase("en-US");
+  if (!key) return 0;
+  return settings.customShellProfiles.filter(
+    (profile) =>
+      profile.id !== excludeProfileId &&
+      normalizeCustomShellExecutable(profile.executable).toLocaleLowerCase("en-US") === key,
+  ).length;
 }
 
 export function normalizeTerminalAppearance(value: unknown): TerminalAppearance {
@@ -381,7 +391,6 @@ export function validateSettings(settings: AppSettings): string[] {
     errors.push(`TonyMux supports at most ${MAX_CUSTOM_SHELL_PROFILES} custom shell profiles.`);
   }
   const ids = new Set<string>();
-  const executables = new Map<string, string>();
   for (const profile of settings.customShellProfiles) {
     if (!CUSTOM_SHELL_PROFILE_ID_PATTERN.test(profile.id)) {
       errors.push(`Custom shell profile ${profile.label || profile.id} has an invalid stable ID.`);
@@ -402,17 +411,6 @@ export function validateSettings(settings: AppSettings): string[] {
     }
     ids.add(profile.id);
 
-    const executableKey = normalizeCustomShellExecutable(profile.executable).toLocaleLowerCase("en-US");
-    if (executableKey) {
-      const existingLabel = executables.get(executableKey);
-      if (existingLabel) {
-        errors.push(
-          `${profile.label.trim() || "Custom shell"} uses the same executable as ${existingLabel}.`,
-        );
-      } else {
-        executables.set(executableKey, profile.label.trim() || "Custom shell");
-      }
-    }
   }
 
   if (

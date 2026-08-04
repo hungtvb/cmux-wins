@@ -106,7 +106,9 @@ Shortcut configuration is data-only: stable action IDs map to canonical `Keyboar
 
 ### Custom executable trust boundary
 
-Custom profile configuration and executable authorization are deliberately separated. React stores bounded profile IDs, labels and paths in settings and snapshots the selected path into new terminal panes. Rust owns `%LOCALAPPDATA%\cmux-windows\trusted-shells-v1.json`, normalizes paths case-insensitively and verifies trust for every spawn. Imported settings never modify the trust store. A custom profile can launch exactly one absolute local `.exe`; command-line arguments, environment assignments, shell expressions, relative paths and UNC locations are rejected before process creation.
+Custom profile configuration and executable authorization are deliberately separated. React stores bounded profile IDs, labels and paths in settings and snapshots the selected path into new terminal panes. Rust owns `%LOCALAPPDATA%\cmux-windows\trusted-shells-v2.json`; each bounded record binds a canonical case-insensitive path to SHA-256 and file size. Imported settings never modify the trust store, and the previous path-only v1 store is not migrated.
+
+A custom profile can launch exactly one absolute local `.exe`; command-line arguments, environment assignments, shell expressions, relative paths and UNC locations are rejected before process creation. Rust opens the executable with write/delete sharing denied, verifies its identity, retains the verification handle through process creation and verifies the same handle again before accepting the child. Standard same-path replacement during the verify-to-spawn window therefore fails closed. Settings provides inspect, revoke, clear and corrupt/future-store recovery actions. Shared configured paths may reuse one trust record, and removing the last profile requires an explicit revoke decision.
 
 ## Known risks
 

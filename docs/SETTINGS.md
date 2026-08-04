@@ -23,13 +23,17 @@ The legacy `CMUX_SHELL` environment variable remains a compatibility override fo
 
 Settings version 5 also supports at most 12 custom profiles. Each profile has a stable `custom:*` ID, a bounded label and one absolute local Windows `.exe` path. Paths cannot contain command-line arguments, quotes, wildcards, environment-variable expansion, alternate data-stream separators, empty segments, `.`/`..` traversal, UNC locations or control characters.
 
-Changing a custom executable path immediately invalidates its UI trust state. The user must press **Trust executable** before selecting it as the default shell. Rust persists the normalized case-insensitive allowlist separately at:
+Changing a custom executable path immediately invalidates its UI trust state. The user must press **Trust executable** before selecting it as the default shell. Rust persists executable identities separately at:
 
 ```text
-%LOCALAPPDATA%\cmux-windows\trusted-shells-v1.json
+%LOCALAPPDATA%\cmux-windows\trusted-shells-v2.json
 ```
 
-The trust file is versioned, bounded to 32 executable paths and replaced through a temporary-file write with rollback of the previous generation when publication fails. Rust grants trust only when the normalized path currently resolves to a file. A missing, corrupt, oversized or future-version trust file fails closed. Before every custom process spawn, Rust validates the profile ID and path again and confirms the normalized path exists in the trust store. Editing localStorage alone cannot authorize a new executable.
+Each record binds the canonical case-insensitive path to its SHA-256 fingerprint and byte length. The store is bounded to 32 records and replaced through a temporary-file write with rollback when publication fails. The previous path-only `trusted-shells-v1.json` file is intentionally not migrated; custom executables must be trusted again after this upgrade.
+
+Before every custom process spawn, Rust opens the file with write/delete sharing denied, checks the current fingerprint against the trusted record, keeps that handle alive through `CreateProcess`, and hashes the same handle again after process creation. If the file is missing, changed, replaced during launch or unavailable, the new child is rejected or terminated. Editing localStorage alone cannot authorize an executable.
+
+Settings lists every trust record with `Identity matches`, `File changed`, `File missing` or `Unavailable` state. Users can refresh, revoke one record, clear all records or reset an unreadable/future-version store without editing files manually. Multiple profiles may share one executable path; removing one profile retains trust while another profile still references that path. Removing the final referencing profile asks before revoking trust.
 
 ## Session behavior
 
@@ -102,6 +106,6 @@ Exported settings intentionally exclude automation tokens, named-pipe details, w
 - `Escape` closes the dialog.
 - Tab focus is trapped inside the modal while it is open.
 - Shortcut recording and conflict messages use status/alert live regions.
-- Custom-profile trust actions report pending, success and failure state through a polite live region.
+- Custom-profile trust actions and store recovery report pending, success and failure state through polite live regions.
 - Form errors use an alert region.
 - The restored-history text block is keyboard-focusable so long content can be scrolled without a pointer.
