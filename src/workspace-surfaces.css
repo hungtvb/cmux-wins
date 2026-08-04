@@ -3,7 +3,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: #080b10;
+  background: var(--tm-canvas);
 }
 
 .workspace-surface {
@@ -32,9 +32,9 @@
   grid-auto-rows: minmax(240px, 1fr);
   gap: 1px;
   overflow: auto;
-  background: #252c36;
+  background: var(--tm-border-default);
   scrollbar-width: thin;
-  scrollbar-color: #35404e #0c0f14;
+  scrollbar-color: var(--tm-border-default) var(--tm-surface-0);
 }
 
 .pane-grid__cell {
@@ -73,7 +73,7 @@
   width: 8px;
   min-height: 0;
   place-items: center;
-  background: #171c24;
+  background: var(--tm-surface-1);
   cursor: col-resize;
   touch-action: none;
 }
@@ -83,13 +83,13 @@
   inset: 0;
   background: transparent;
   content: "";
-  transition: background 120ms ease;
+  transition: background var(--tm-motion-fast) var(--tm-ease);
 }
 
 .pane-resizer:hover::before,
 .pane-resizer:focus-visible::before,
 .pane-resizer:active::before {
-  background: rgba(125, 156, 255, 0.12);
+  background: var(--tm-focus-soft);
 }
 
 .pane-resizer > span {
@@ -98,16 +98,17 @@
   width: 2px;
   height: 42px;
   border-radius: 999px;
-  background: #3d4859;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
-  transition: height 120ms ease, background 120ms ease;
+  background: var(--tm-border-strong);
+  transition:
+    height var(--tm-motion-fast) var(--tm-ease),
+    background var(--tm-motion-fast) var(--tm-ease);
 }
 
 .pane-resizer:hover > span,
 .pane-resizer:focus-visible > span,
 .pane-resizer:active > span {
   height: 58px;
-  background: #7d9cff;
+  background: var(--tm-focus);
 }
 
 @media (max-width: 760px) {

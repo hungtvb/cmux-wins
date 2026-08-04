@@ -88,7 +88,12 @@ export function WorkspaceSidebar({
                 <span className="workspace-item__shortcut">{index + 1}</span>
                 <span className="workspace-item__icon">
                   <SquareTerminal size={15} />
-                  {metadata?.dirty && <span className="workspace-item__dirty" title="Modified" />}
+                  {metadata?.dirty && (
+                    <>
+                      <span className="workspace-item__dirty" aria-hidden="true" />
+                      <span className="sr-only">Modified</span>
+                    </>
+                  )}
                 </span>
                 <span className="workspace-item__body">
                   <span className="workspace-item__heading">
