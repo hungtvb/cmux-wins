@@ -19,6 +19,12 @@ TonyMux is a platform port and independent Windows implementation, not a direct 
 
 The repository is delivered through stacked pull requests. Do not merge a stacked PR before its base PR.
 
+## Design system
+
+TonyMux uses the **Quiet Operator** design direction: a dark, low-distraction Windows developer workspace where terminal and browser content remain dominant, blue represents focus and selection, and violet is reserved for agent attention that requires human input.
+
+See [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) before designing, reviewing, or implementing UI changes. It is the project baseline for layout, tokens, component states, accessibility, and future visual adoption.
+
 ## Prerequisites
 
 Install on Windows 11:
