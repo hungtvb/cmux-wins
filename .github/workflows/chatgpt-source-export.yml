@@ -1,4 +1,4 @@
-name: ChatGPT Source Export
+name: ChatGPT Apply Verified TonyMux Patch
 
 on:
   pull_request:
@@ -6,51 +6,121 @@ on:
       - feat/quiet-operator-panes
     paths:
       - .github/workflows/chatgpt-source-export.yml
+      - .chatgpt/tonymux-patch/**
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export-source:
+  apply-verified-patch:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
-      - name: Checkout repository and full history
+      - name: Checkout temporary bridge branch
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
 
-      - name: Checkout exact PR base commit
+      - name: Reassemble and verify patch bytes
+        id: patch
         shell: bash
         run: |
           set -euo pipefail
+
+          patch_b64="$RUNNER_TEMP/tonymux.patch.b64"
+          patch_file="$RUNNER_TEMP/tonymux.patch"
+
+          cat .chatgpt/tonymux-patch/part-*.txt > "$patch_b64"
+          base64 --decode "$patch_b64" > "$patch_file"
+          echo "15e7f088878b61a728db3eabfdb5a5caea67b805fac41afd12ac373518d27d5b  $patch_file" | sha256sum --check
+          test -s "$patch_file"
+          echo "patch_file=$patch_file" >> "$GITHUB_OUTPUT"
+
+      - name: Apply patch to exact cumulative base
+        id: apply
+        shell: bash
+        env:
+          PATCH_FILE: ${{ steps.patch.outputs.patch_file }}
+        run: |
+          set -euo pipefail
+
+          readonly expected_base="1102c1582be618d0d7a9fe03d9568ac94e37aac7"
+          readonly expected_tree="b079d30f8586e1826aab05a5ff828202478238f0"
+          readonly target_branch="feat/tony-design-system-ui"
+
           git checkout --detach "${{ github.event.pull_request.base.sha }}"
-          git config --local --unset-all http.https://github.com/.extraheader || true
+          test "$(git rev-parse HEAD)" = "$expected_base"
 
-      - name: Package exact source snapshot with Git history
+          git apply --check "$PATCH_FILE"
+          git apply "$PATCH_FILE"
+          git diff --check
+
+          cat > "$RUNNER_TEMP/expected-files.txt" <<'EOF'
+          docs/DESIGN-SYSTEM.md
+          src/browser-pane.css
+          src/command-palette.css
+          src/components/TerminalPane.tsx
+          src/hooks/useTerminalSession.ts
+          src/settings-dialog.css
+          src/settings.ts
+          src/styles.css
+          src/workspace-controls.css
+          src/workspace-metadata.css
+          src/workspace-surfaces.css
+          EOF
+
+          git diff --name-only | LC_ALL=C sort > "$RUNNER_TEMP/actual-files.txt"
+          LC_ALL=C sort "$RUNNER_TEMP/expected-files.txt" -o "$RUNNER_TEMP/expected-files.txt"
+          diff -u "$RUNNER_TEMP/expected-files.txt" "$RUNNER_TEMP/actual-files.txt"
+
+          git add -- \
+            docs/DESIGN-SYSTEM.md \
+            src/browser-pane.css \
+            src/command-palette.css \
+            src/components/TerminalPane.tsx \
+            src/hooks/useTerminalSession.ts \
+            src/settings-dialog.css \
+            src/settings.ts \
+            src/styles.css \
+            src/workspace-controls.css \
+            src/workspace-metadata.css \
+            src/workspace-surfaces.css
+
+          actual_tree="$(git write-tree)"
+          test "$actual_tree" = "$expected_tree"
+
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m 'style: apply Tony design system to workspace UI'
+
+          commit_sha="$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^{tree})" = "$expected_tree"
+
+          git push origin "HEAD:refs/heads/$target_branch" \
+            --force-with-lease="refs/heads/$target_branch:$expected_base"
+
+          {
+            echo "commit_sha=$commit_sha"
+            echo "tree_sha=$actual_tree"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write verification manifest
         shell: bash
         run: |
           set -euo pipefail
+          cat > "$RUNNER_TEMP/tonymux-design-verification.txt" <<EOF
+          base_sha=1102c1582be618d0d7a9fe03d9568ac94e37aac7
+          patch_sha256=15e7f088878b61a728db3eabfdb5a5caea67b805fac41afd12ac373518d27d5b
+          commit_sha=${{ steps.apply.outputs.commit_sha }}
+          tree_sha=${{ steps.apply.outputs.tree_sha }}
+          target_branch=feat/tony-design-system-ui
+          EOF
 
-          archive="$RUNNER_TEMP/${GITHUB_REPOSITORY#*/}-feat-quiet-operator-panes-with-git.tar.gz"
-          checksum="$archive.sha256"
-
-          tar -C "$GITHUB_WORKSPACE" -czf "$archive" .
-          test -s "$archive"
-
-          (
-            cd "$RUNNER_TEMP"
-            sha256sum "$(basename "$archive")" > "$(basename "$checksum")"
-          )
-
-      - name: Upload source snapshot
+      - name: Upload verification manifest
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.repository.name }}-feat-quiet-operator-panes-with-git
-          path: |
-            ${{ runner.temp }}/${{ github.event.repository.name }}-feat-quiet-operator-panes-with-git.tar.gz
-            ${{ runner.temp }}/${{ github.event.repository.name }}-feat-quiet-operator-panes-with-git.tar.gz.sha256
+          name: tonymux-design-verification
+          path: ${{ runner.temp }}/tonymux-design-verification.txt
           if-no-files-found: error
           retention-days: 1
