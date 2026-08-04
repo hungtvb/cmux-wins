@@ -96,13 +96,20 @@ The ConPTY suite verifies:
 - [ ] `Ctrl+Shift+B` creates a browser pane
 - [ ] GitHub and a local development URL load without iframe restrictions
 - [ ] Back, forward, reload and address navigation work
-- [ ] HTTP and HTTPS navigation work; non-HTTP(S) navigation is rejected
+- [ ] An in-page link or redirect updates the address bar to the committed HTTP(S) URL
+- [ ] The pane title follows the loaded document title and remains bounded in the sidebar/layout
+- [ ] Loading state appears during navigation and clears after completion
+- [ ] A stalled navigation shows the 30-second retryable error; Retry starts a fresh navigation
+- [ ] HTTP and HTTPS navigation work
+- [ ] `file:`, `javascript:`, `data:`, custom protocols and credential-bearing URLs are rejected with visible feedback
+- [ ] `window.open` or a `target=_blank` link is denied and shows a popup notice
+- [ ] A download request is denied, shows a notice and creates no file
 - [ ] Browser pane stays alive while switching workspaces
 - [ ] Hidden workspace browser panes do not overlay the active workspace
 - [ ] Pane bounds remain correct after window resize and DPI/display changes
 - [ ] Browser focus returns correctly to terminal input
 - [ ] Closing a browser pane removes its native WebView2 child
-- [ ] Popup, download and external-protocol behavior is recorded as pass or linked defect
+- [ ] Remote DevTools cannot invoke TonyMux/Tauri commands
 
 ### Git, PR and listening-port metadata
 
