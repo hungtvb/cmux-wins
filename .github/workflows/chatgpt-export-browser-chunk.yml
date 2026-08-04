@@ -1,0 +1,45 @@
+name: ChatGPT Export Browser Chunk
+
+on:
+  pull_request:
+    branches:
+      - feat/custom-shell-trust-lifecycle
+    paths:
+      - .github/workflows/chatgpt-export-browser-chunk.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Download staged blob bytes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BAD_BLOB: 39425e7c71baf8b5eb46c10b534cb6656fc9ce26
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/blobs/$BAD_BLOB" \
+            | jq --raw-output '.content' \
+            | tr -d '\n' \
+            | base64 --decode > "$RUNNER_TEMP/browser-hardening.part-02.bad"
+          wc -c "$RUNNER_TEMP/browser-hardening.part-02.bad"
+          git hash-object "$RUNNER_TEMP/browser-hardening.part-02.bad"
+          sha256sum "$RUNNER_TEMP/browser-hardening.part-02.bad" > "$RUNNER_TEMP/browser-hardening.part-02.bad.sha256"
+
+      - name: Upload staged blob bytes
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-hardening-bad-chunk
+          path: |
+            ${{ runner.temp }}/browser-hardening.part-02.bad
+            ${{ runner.temp }}/browser-hardening.part-02.bad.sha256
+          if-no-files-found: error
+          retention-days: 1
