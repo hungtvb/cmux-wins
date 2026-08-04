@@ -22,28 +22,55 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Download exact patch through temporary file bridge
+      - name: Recover exact browser patch chunk
         shell: bash
         env:
-          PATCH_URL: https://slack-files.com/T0BK3FC32DT-F0BMV19UAQH-17a46804eb
-          EXPECTED_PATCH_SHA: bc7fcd966fd56b1633b9353cb53f222f2dbc33ea6376f80dc7cdd199d471990b
-          EXPECTED_PATCH_SIZE: 47103
+          GH_TOKEN: ${{ github.token }}
+          BAD_BLOB: 39425e7c71baf8b5eb46c10b534cb6656fc9ce26
+          EXPECTED_DELTA_SHA: f589549b506657ca8e862ba8d6633e5c24ddfc8c893c2d4ea21eb18da176eb75
+          EXPECTED_CHUNK_BLOB: 33362dd8f8898b266ac2231f2033b8d5abf6e34e
+          EXPECTED_CHUNK_SIZE: 16000
         run: |
           set -euo pipefail
-          patch="$RUNNER_TEMP/browser-hardening.patch"
-          curl --fail --silent --show-error --location "$PATCH_URL" --output "$patch"
-          test "$(wc -c < "$patch" | tr -d ' ')" = "$EXPECTED_PATCH_SIZE"
-          test "$(sha256sum "$patch" | awk '{print $1}')" = "$EXPECTED_PATCH_SHA"
+
+          bad="$RUNNER_TEMP/browser-hardening.part-02.bad"
+          delta="$RUNNER_TEMP/browser-hardening.part-02.delta.zst"
+          repaired="$RUNNER_TEMP/browser-hardening.part-02"
+
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/blobs/$BAD_BLOB" \
+            | jq --raw-output '.content' \
+            | tr -d '\n' \
+            | base64 --decode > "$bad"
+
+          cat .chatgpt/browser-delta.part-* | base64 --decode > "$delta"
+          test "$(sha256sum "$delta" | awk '{print $1}')" = "$EXPECTED_DELTA_SHA"
+
+          zstd --decompress --patch-from="$bad" "$delta" --output "$repaired" --force
+          test "$(wc -c < "$repaired" | tr -d ' ')" = "$EXPECTED_CHUNK_SIZE"
+          test "$(git hash-object "$repaired")" = "$EXPECTED_CHUNK_BLOB"
 
       - name: Publish verified product commit
         shell: bash
         env:
           BASE_SHA: 8fe5c7b2efb3199e40842044d7e37b1a6ca62826
+          EXPECTED_PATCH_SHA: bc7fcd966fd56b1633b9353cb53f222f2dbc33ea6376f80dc7cdd199d471990b
           EXPECTED_TREE: 06e54ce094a88c4374abd189415bbd13f3f7e612
           TARGET_BRANCH: feat/browser-pane-hardening
         run: |
           set -euo pipefail
+
           patch="$RUNNER_TEMP/browser-hardening.patch"
+          cat \
+            .chatgpt/browser-hardening.part-00 \
+            .chatgpt/browser-hardening.part-01 \
+            "$RUNNER_TEMP/browser-hardening.part-02" \
+            .chatgpt/browser-hardening.part-03 \
+            | base64 --decode > "$patch"
+
+          test "$(sha256sum "$patch" | awk '{print $1}')" = "$EXPECTED_PATCH_SHA"
 
           git checkout --detach "$BASE_SHA"
           git config user.name "hungtvb"
