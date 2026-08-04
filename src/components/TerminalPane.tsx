@@ -81,17 +81,19 @@ function TerminalPaneComponent({
   return (
     <section
       className={`terminal-pane${focused ? " terminal-pane--focused" : ""}${attention ? " terminal-pane--attention" : ""}${initialRestoredHistory ? " terminal-pane--with-history" : ""}`}
+      aria-label={`Terminal pane: ${title}`}
       onFocusCapture={onFocus}
       onPointerDown={onFocus}
     >
       <header className="terminal-pane__header">
         <div className="terminal-pane__title" title={title}>
           {attention ? (
-            <BellRing size={14} aria-label="Agent requires attention" />
+            <BellRing size={14} aria-hidden="true" />
           ) : (
             <SquareTerminal size={13} aria-hidden="true" />
           )}
           <span>{title}</span>
+          {attention && <span className="pane-attention-label">Needs input</span>}
           {restored && (
             <span className="pane-restore-label">
               {initialRestoredHistory ? "Restored history" : "Restored · new shell"}
