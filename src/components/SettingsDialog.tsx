@@ -150,12 +150,15 @@ export function SettingsDialog({
   const shortcutsStatusId = useId();
   const trustStoreStatusId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const errorSummaryRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const trustQueryGenerationRef = useRef(0);
   const [draft, setDraft] = useState(() => cloneSettings(settings));
   const draftRef = useRef(draft);
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
   const [recordingActionId, setRecordingActionId] = useState<ShortcutActionId | null>(null);
   const [shortcutError, setShortcutError] = useState("");
   const [trustedExecutables, setTrustedExecutables] = useState<Record<string, boolean>>({});
@@ -171,10 +174,24 @@ export function SettingsDialog({
 
   useEffect(() => {
     if (!open) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      requestAnimationFrame(() => returnFocusRef.current?.focus());
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || errors.length === 0) return;
+    requestAnimationFrame(() => errorSummaryRef.current?.focus());
+  }, [errors, open]);
+
+  useEffect(() => {
+    if (!open) return;
     let disposed = false;
     setDraft(cloneSettings(settings));
     setErrors([]);
     setNotice("");
+    setSaving(false);
     setRecordingActionId(null);
     setShortcutError("");
     setTrustPendingId(null);
@@ -192,7 +209,7 @@ export function SettingsDialog({
     requestAnimationFrame(() => {
       dialogRef.current
         ?.querySelector<HTMLElement>(
-          "button:not([disabled]), input:not([disabled]), select:not([disabled])",
+          'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), select:not([disabled]):not([tabindex="-1"])',
         )
         ?.focus();
     });
@@ -418,7 +435,7 @@ export function SettingsDialog({
 
     const focusable = Array.from(
       dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), select:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])',
       ) ?? [],
     );
     if (focusable.length === 0) return;
@@ -435,6 +452,7 @@ export function SettingsDialog({
   };
 
   const save = async () => {
+    if (saving) return;
     const nextErrors = validateSettings(draft);
     setErrors(nextErrors);
     if (nextErrors.length) return;
@@ -445,6 +463,7 @@ export function SettingsDialog({
       normalized.defaultShellProfileId,
     );
     if (selectedCustomProfile) {
+      setSaving(true);
       try {
         const trusted = await invoke<boolean>("is_shell_executable_trusted", {
           executable: selectedCustomProfile.executable,
@@ -457,14 +476,17 @@ export function SettingsDialog({
           setErrors([
             `${selectedCustomProfile.label} must be explicitly trusted before it can be the default shell.`,
           ]);
+          setSaving(false);
           return;
         }
       } catch (cause) {
         setErrors([`Unable to verify custom shell trust: ${String(cause)}`]);
+        setSaving(false);
         return;
       }
     }
 
+    setSaving(false);
     onSave(normalized);
     onClose();
   };
@@ -636,6 +658,27 @@ export function SettingsDialog({
         </header>
 
         <div className="settings-dialog__body">
+          {notice && (
+            <div className="settings-notice" role="status">
+              {notice}
+            </div>
+          )}
+
+          {errors.length > 0 && (
+            <div
+              ref={errorSummaryRef}
+              className="settings-errors"
+              role="alert"
+              tabIndex={-1}
+              aria-label="Settings errors"
+            >
+              <strong>Review the following settings</strong>
+              {errors.map((error) => (
+                <p key={error}>{error}</p>
+              ))}
+            </div>
+          )}
+
           <section className="settings-section" aria-labelledby="settings-shell-title">
             <div className="settings-section__heading">
               <TerminalSquare size={15} aria-hidden="true" />
@@ -1219,19 +1262,6 @@ export function SettingsDialog({
             </div>
           </section>
 
-          {notice && (
-            <div className="settings-notice" role="status">
-              {notice}
-            </div>
-          )}
-
-          {errors.length > 0 && (
-            <div className="settings-errors" role="alert">
-              {errors.map((error) => (
-                <p key={error}>{error}</p>
-              ))}
-            </div>
-          )}
         </div>
 
         <footer className="settings-dialog__footer">
@@ -1260,6 +1290,7 @@ export function SettingsDialog({
               ref={importInputRef}
               className="sr-only"
               type="file"
+              tabIndex={-1}
               accept="application/json,.json"
               onChange={importFile}
             />
@@ -1268,8 +1299,14 @@ export function SettingsDialog({
             <button className="settings-button settings-button--quiet" type="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="settings-button settings-button--primary" type="button" onClick={save}>
-              Save settings
+            <button
+              className="settings-button settings-button--primary"
+              type="button"
+              disabled={saving}
+              aria-busy={saving}
+              onClick={() => void save()}
+            >
+              {saving ? "Saving…" : "Save settings"}
             </button>
           </div>
         </footer>

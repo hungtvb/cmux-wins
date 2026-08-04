@@ -81,11 +81,15 @@ These are target tokens. Existing CSS variables may migrate incrementally, but n
   --tm-focus: #72a7ff;
   --tm-focus-soft: rgba(114, 167, 255, 0.12);
   --tm-focus-ring: rgba(114, 167, 255, 0.78);
+  --tm-focus-fill: #376abc;
+  --tm-focus-fill-hover: #3f72c8;
 
   --tm-success: #66c997;
   --tm-warning: #e4b86a;
   --tm-danger: #ef8292;
+  --tm-danger-strong: #ffc2cb;
   --tm-attention: #b9a0ff;
+  --tm-attention-soft: rgba(185, 160, 255, 0.12);
 
   --tm-font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --tm-font-mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
@@ -93,6 +97,9 @@ These are target tokens. Existing CSS variables may migrate incrementally, but n
   --tm-motion-fast: 100ms;
   --tm-motion-standard: 150ms;
   --tm-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --tm-z-settings: 90;
+  --tm-z-command-palette: 100;
 }
 ```
 
@@ -107,6 +114,8 @@ These are target tokens. Existing CSS variables may migrate incrementally, but n
 | Violet | an agent or process requires human input |
 
 Violet is not generic branding. Agent attention must remain distinct from selection and focus.
+
+Primary filled controls use the darker `--tm-focus-fill` pair so white labels retain WCAG AA contrast. Modal layers use the documented z-index tokens rather than ad-hoc values.
 
 ### Typography
 
