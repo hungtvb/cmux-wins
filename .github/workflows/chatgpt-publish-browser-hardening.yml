@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Recover exact browser patch chunk
+      - name: Recover exact browser patch chunk 02
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -52,6 +52,36 @@ jobs:
           test "$(wc -c < "$repaired" | tr -d ' ')" = "$EXPECTED_CHUNK_SIZE"
           test "$(git hash-object "$repaired")" = "$EXPECTED_CHUNK_BLOB"
 
+      - name: Recover exact browser patch chunk 03
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BAD_BLOB: a53a3df14713b4983b7a2ada563694bd7e886a2f
+          EXPECTED_DELTA_SHA: 8d0244328ce9ad923da79d3f7b88a9cf4c78819d89773e07db88cd18d5026ecb
+          EXPECTED_CHUNK_BLOB: 74a22a5affa7da1e93ef3f51454b05a9931fa11c
+          EXPECTED_CHUNK_SIZE: 14804
+        run: |
+          set -euo pipefail
+
+          bad="$RUNNER_TEMP/browser-hardening.part-03.bad"
+          delta="$RUNNER_TEMP/browser-hardening.part-03.delta.zst"
+          repaired="$RUNNER_TEMP/browser-hardening.part-03"
+
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/blobs/$BAD_BLOB" \
+            | jq --raw-output '.content' \
+            | tr -d '\n' \
+            | base64 --decode > "$bad"
+
+          cat .chatgpt/browser03-delta.part-* | base64 --decode > "$delta"
+          test "$(sha256sum "$delta" | awk '{print $1}')" = "$EXPECTED_DELTA_SHA"
+
+          zstd --decompress --patch-from="$bad" "$delta" -o "$repaired" --force
+          test "$(wc -c < "$repaired" | tr -d ' ')" = "$EXPECTED_CHUNK_SIZE"
+          test "$(git hash-object "$repaired")" = "$EXPECTED_CHUNK_BLOB"
+
       - name: Publish verified product commit
         shell: bash
         env:
@@ -67,7 +97,7 @@ jobs:
             .chatgpt/browser-hardening.part-00 \
             .chatgpt/browser-hardening.part-01 \
             "$RUNNER_TEMP/browser-hardening.part-02" \
-            .chatgpt/browser-hardening.part-03 \
+            "$RUNNER_TEMP/browser-hardening.part-03" \
             | base64 --decode > "$patch"
 
           test "$(sha256sum "$patch" | awk '{print $1}')" = "$EXPECTED_PATCH_SHA"
