@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/chatgpt-publish-qa-evidence.yml
       - .chatgpt/qa-evidence.patch.b64.part*
+      - .chatgpt/qa-evidence.patch.b64.tail*
 
 permissions:
   contents: write
@@ -30,7 +31,8 @@ jobs:
           transport="$RUNNER_TEMP/qa-evidence.patch.b64"
           patch="$RUNNER_TEMP/qa-evidence.patch"
 
-          cat .chatgpt/qa-evidence.patch.b64.part* > "$transport"
+          cat .chatgpt/qa-evidence.patch.b64.part0[0-6] \
+              .chatgpt/qa-evidence.patch.b64.tail* > "$transport"
           base64 --decode "$transport" > "$patch"
           test "$(sha256sum "$patch" | awk '{print $1}')" = "e7ee5c5a7c38b94ee77c29086fc7126d5041313d13759d4b9252efa21c1cd928"
           test -s "$patch"
