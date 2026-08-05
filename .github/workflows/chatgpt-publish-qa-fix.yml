@@ -1,0 +1,57 @@
+name: ChatGPT Publish QA Fix
+
+on:
+  pull_request:
+    branches:
+      - feat/windows-qa-evidence-bundle
+    paths:
+      - .github/workflows/chatgpt-publish-qa-fix.yml
+      - .chatgpt/qa-fix.patch.b64
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Verify and apply exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$RUNNER_TEMP/qa-fix.patch"
+          expected_base="1a6e5ea1e8e5a773e946ea6d68c7234d51bf9048"
+          expected_tree="835a4768506204cf2f0a3ed3fe07b24748559e4b"
+          product_branch="feat/windows-qa-evidence-bundle"
+
+          base64 --decode .chatgpt/qa-fix.patch.b64 > "$patch"
+          test "$(sha256sum "$patch" | awk '{print $1}')" = "5d2b62d4ca892a89aa3981d7128b9e889ff8f91b7004aa0dce6cc6d5e25dbb1e"
+          test "${{ github.event.pull_request.base.sha }}" = "$expected_base"
+
+          git checkout --detach "$expected_base"
+          git switch -C "$product_branch"
+          git apply --check "$patch"
+          git apply "$patch"
+          git diff --check
+
+          test ! -e .chatgpt
+          test ! -e .github/workflows/chatgpt-publish-qa-fix.yml
+
+          git add --all
+          git config user.name "hungtvb"
+          git config user.email "69663872+hungtvb@users.noreply.github.com"
+          git commit -m "fix: keep Windows QA collector ASCII-safe"
+
+          actual_tree="$(git rev-parse HEAD^{tree})"
+          test "$actual_tree" = "$expected_tree"
+          test "$(git rev-list --count "$expected_base"..HEAD)" = "1"
+
+          git push origin "HEAD:refs/heads/$product_branch"
