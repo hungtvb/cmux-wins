@@ -4,6 +4,7 @@ export const MAX_TERMINAL_HISTORY_BYTES_PER_PANE = 512 * 1024;
 export const MAX_TERMINAL_HISTORY_BYTES_TOTAL = 4 * 1024 * 1024;
 
 const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder();
 
 function stripTerminalControlSequences(value: string): string {
   type ParserState = "normal" | "escape" | "csi" | "osc" | "string" | "oscEscape" | "stringEscape";
@@ -81,20 +82,16 @@ function stripTerminalControlSequences(value: string): string {
 }
 function trimOldestUtf8Bytes(value: string, maxBytes: number): string {
   if (maxBytes <= 0 || !value) return "";
-  if (utf8Encoder.encode(value).byteLength <= maxBytes) return value;
 
-  const characters = Array.from(value);
-  let usedBytes = 0;
-  let startIndex = characters.length;
+  const encoded = utf8Encoder.encode(value);
+  if (encoded.byteLength <= maxBytes) return value;
 
-  for (let index = characters.length - 1; index >= 0; index -= 1) {
-    const nextBytes = utf8Encoder.encode(characters[index]).byteLength;
-    if (usedBytes + nextBytes > maxBytes) break;
-    usedBytes += nextBytes;
-    startIndex = index;
+  let startIndex = encoded.byteLength - maxBytes;
+  while (startIndex < encoded.byteLength && (encoded[startIndex] & 0xc0) === 0x80) {
+    startIndex += 1;
   }
 
-  return characters.slice(startIndex).join("").replace(/^\n+/, "");
+  return utf8Decoder.decode(encoded.subarray(startIndex)).replace(/^\n+/, "");
 }
 
 export function normalizeTerminalHistoryLineLimit(value: unknown): number {
