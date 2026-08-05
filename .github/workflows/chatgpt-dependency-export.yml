@@ -1,0 +1,68 @@
+name: ChatGPT Dependency Export
+
+on:
+  pull_request:
+    branches:
+      - feat/tony-design-system-ui
+    paths:
+      - .github/workflows/chatgpt-dependency-export.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export-dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository and full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout exact PR base commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout --detach "${{ github.event.pull_request.base.sha }}"
+          git config --local --unset-all http.https://github.com/.extraheader || true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install and verify frontend dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Package exact dependency tree
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="$RUNNER_TEMP/${GITHUB_REPOSITORY#*/}-tony-design-system-ui-node-modules.tar.gz"
+          checksum="$archive.sha256"
+
+          tar -C "$GITHUB_WORKSPACE" -czf "$archive" node_modules package-lock.json
+          test -s "$archive"
+
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$(basename "$archive")" > "$(basename "$checksum")"
+          )
+
+      - name: Upload dependency snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-tony-design-system-ui-node-modules
+          path: |
+            ${{ runner.temp }}/${{ github.event.repository.name }}-tony-design-system-ui-node-modules.tar.gz
+            ${{ runner.temp }}/${{ github.event.repository.name }}-tony-design-system-ui-node-modules.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
