@@ -1,4 +1,4 @@
-# Releasing cmux Windows
+# Releasing TonyMux
 
 Windows releases are created by `.github/workflows/windows-release.yml` from version tags. Do not create a release tag until the target commit is merged into `main` and the Windows CI plus interactive QA evidence are acceptable for that release.
 
@@ -63,27 +63,44 @@ The release workflow will:
 3. Build the frontend.
 4. Run Windows ConPTY integration tests.
 5. Build MSI and NSIS installers.
-6. Rename assets with version and `x64` architecture.
-7. Generate `SHA256SUMS.txt` and `build-metadata.json`.
-8. Upload an immutable workflow artifact.
-9. Create or update the matching GitHub Release.
+6. Build the TonyMux and compatibility automation CLIs.
+7. Assemble and verify the deterministic portable Windows ZIP.
+8. Rename assets with version and `x64` architecture.
+9. Generate `SHA256SUMS.txt` and `build-metadata.json`.
+10. Upload an immutable workflow artifact.
+11. Create or update the matching GitHub Release.
 
 ## Release assets
 
 Expected assets:
 
 ```text
-cmux-windows-<version>-x64.msi
-cmux-windows-<version>-x64-setup.exe
+tonymux-<version>-windows-portable-x64.zip
+tonymux-<version>-x64.msi
+tonymux-<version>-x64-setup.exe
 SHA256SUMS.txt
 build-metadata.json
 ```
 
-Verify an installer after download:
+The portable ZIP is the primary quick-test artifact. Extract the entire archive into a writable directory and run `TonyMux.exe`; no MSI/NSIS installation is required. It contains the desktop executable, `tonymux-cli.exe`, the deprecated `cmux-cli.exe` compatibility alias, portable metadata, a quick-start README and file-level checksums.
+
+The no-install build intentionally uses the same Tauri application identifier and Windows user-data locations as the installed build. Deleting the extracted directory removes the binaries but not settings or workspace state stored under the Windows profile. This behavior is documented in `README-PORTABLE.txt` and must not change silently.
+
+The portable build relies on the supported system Microsoft Edge WebView2 Runtime. TonyMux does not silently download or bundle an untracked runtime into the portable archive.
+
+Verify downloaded assets:
 
 ```powershell
-Get-FileHash .\cmux-windows-0.2.0-beta.1-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\tonymux-0.2.0-beta.1-windows-portable-x64.zip -Algorithm SHA256
+Get-FileHash .\tonymux-0.2.0-beta.1-x64-setup.exe -Algorithm SHA256
 Get-Content .\SHA256SUMS.txt
+```
+
+After extracting the portable ZIP, verify its contents:
+
+```powershell
+Get-Content .\SHA256SUMS.txt
+Get-FileHash .\TonyMux.exe -Algorithm SHA256
 ```
 
 ## Rerunning safely

@@ -1,13 +1,13 @@
 # Windows 11 Runtime QA
 
-This checklist covers behavior that compile checks and headless ConPTY tests cannot fully prove. Record the Windows build, shell versions, installer used, tester, date, and evidence for every run.
+This checklist covers behavior that compile checks and headless ConPTY tests cannot fully prove. Record the Windows build, shell versions, package used, tester, date, and evidence for every run.
 
 ## Test environment
 
 - Windows edition/build:
 - Device architecture:
 - cmux commit/version:
-- Installer: MSI / NSIS / development build
+- Package: portable ZIP / MSI / NSIS / development build
 - Windows PowerShell version:
 - PowerShell 7 version:
 - Git / GitHub CLI version:
@@ -24,7 +24,7 @@ The `Windows CI` workflow should pass all of these before interactive QA:
 - Rust unit tests
 - Windows ConPTY integration tests
 - `cmux-cli.exe` release build
-- MSI and NSIS packaging
+- Portable ZIP, MSI and NSIS packaging
 
 When GitHub-hosted runners are unavailable, run the equivalent local gate on Windows 11:
 
@@ -38,7 +38,7 @@ For a full app/CLI round trip:
 powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1 -AutomationSmoke
 ```
 
-Attach the complete console output to the relevant PR or issue. A local pass does not replace installer QA, DPI/input checks or an eventual CI pass.
+Attach the complete console output to the relevant PR or issue. A local pass does not replace portable/installer QA, DPI/input checks or an eventual CI pass.
 
 ## Reproducible evidence bundle
 
@@ -46,6 +46,7 @@ Use the evidence collector on the exact commit and Windows 11 device being teste
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\collect-windows-qa-evidence.ps1 `
+  -PortablePaths .\tonymux-0.1.0-windows-portable-x64.zip `
   -InstallerPaths .\TonyMux_0.1.0_x64_en-US.msi, .\TonyMux_0.1.0_x64-setup.exe `
   -IncludeTerminalAutomation `
   -IncludeEventAutomation
@@ -55,7 +56,7 @@ The command writes a timestamped directory and ZIP under `artifacts\windows-qa`.
 
 - exact Git commit/tree and dirty-state count;
 - privacy-bounded Windows, PowerShell, Git/GitHub CLI and WebView2 versions;
-- SHA-256 hashes for supplied installers and available release binaries;
+- SHA-256 hashes for supplied portable/installer packages and available release binaries;
 - pass/fail/skipped results and complete logs for each requested automated step;
 - before/after TonyMux/shell process and listening-port snapshots;
 - a machine-readable manifest, checksums and a separate unchecked manual checklist.
@@ -83,9 +84,31 @@ The ConPTY suite verifies:
 - Explicit child kill and termination
 - PowerShell 7 round trip when `pwsh.exe` is installed
 
+## Portable quick-test build
+
+For routine QA, use the exact-head portable artifact first:
+
+```powershell
+Expand-Archive .\tonymux-0.1.0-windows-portable-x64.zip .\tonymux-portable
+Set-Location .\tonymux-portable
+Get-Content .\SHA256SUMS.txt
+.\TonyMux.exe
+```
+
+The archive requires no installation and does not register uninstall entries, file associations, startup tasks or machine-wide components. It intentionally shares the normal TonyMux Windows-profile settings/workspace data and `%LOCALAPPDATA%\cmux-windows` automation discovery path with installed builds. Close all TonyMux instances before switching package types; use a backed-up clean Windows profile when isolated-state evidence is required.
+
+The system Microsoft Edge WebView2 Runtime remains required. Record missing-runtime behavior as a defect rather than silently installing dependencies during QA.
+
 ## Interactive smoke checklist
 
-### Installation and launch
+### Portable, installation and launch
+
+- [ ] Portable ZIP extracts and launches `TonyMux.exe` without installation
+- [ ] Portable ZIP works from a writable path containing spaces and Unicode characters
+- [ ] Moving the extracted portable directory does not break launch
+- [ ] `SHA256SUMS.txt` verifies every shipped portable file
+- [ ] Deleting the extracted directory removes the portable binaries without creating an uninstall entry
+- [ ] Shared Windows-profile data behavior matches `README-PORTABLE.txt`
 
 - [ ] MSI installs and launches the application
 - [ ] MSI uninstall removes the application without removing unrelated user data
@@ -240,7 +263,7 @@ Tester/date:
 - Automated ConPTY tests pass on the tested head.
 - Frontend reducer, Rust unit and local automation tests pass.
 - Every applicable interactive checklist item is pass or has a linked defect.
-- MSI and NSIS installation results are recorded.
+- Portable launch plus MSI and NSIS installation results are recorded.
 - No orphan-process defect remains open.
 - Browser, metadata and automation evidence is attached to their tracking issues.
 - QA evidence is posted to issue #2 before PR #1 is merged.

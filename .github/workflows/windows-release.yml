@@ -12,6 +12,7 @@ on:
       - "src-tauri/Cargo.toml"
       - "src-tauri/tauri.conf.json"
       - "src-tauri/icons/**"
+      - "scripts/package-windows-portable.ps1"
   workflow_dispatch:
 
 permissions:
@@ -98,6 +99,21 @@ jobs:
       - name: Build MSI and NSIS installers
         run: npm run tauri build
 
+      - name: Build automation CLIs
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin tonymux-cli --bin cmux-cli
+
+      - name: Package portable Windows build
+        id: portable
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-portable.ps1 `
+            -DesktopExecutable .\src-tauri\target\release\tonymux.exe `
+            -PrimaryCli .\src-tauri\target\release\tonymux-cli.exe `
+            -CompatibilityCli .\src-tauri\target\release\cmux-cli.exe `
+            -OutputDirectory .\portable-output `
+            -Version "${{ steps.version.outputs.version }}" `
+            -Commit $env:GITHUB_SHA
+
       - name: Prepare versioned release assets
         shell: pwsh
         run: |
@@ -112,6 +128,8 @@ jobs:
 
           Copy-Item $msi.FullName "release-assets/tonymux-$version-x64.msi"
           Copy-Item $nsis.FullName "release-assets/tonymux-$version-x64-setup.exe"
+          Copy-Item "${{ steps.portable.outputs.portable_zip }}" `
+            "release-assets/tonymux-$version-windows-portable-x64.zip"
 
           [ordered]@{
             product = "TonyMux"
@@ -137,6 +155,7 @@ jobs:
           Automated Windows build produced from commit `__COMMIT__`.
 
           ## Assets
+          - x64 portable ZIP (extract and run `TonyMux.exe`)
           - x64 MSI installer
           - x64 NSIS setup executable
           - SHA-256 checksum manifest
@@ -147,13 +166,14 @@ jobs:
           - Interactive Windows 11 QA evidence is tracked in issue #2.
           - The legacy `cmux-cli.exe`, named pipe and local automation config path remain available for compatibility during the TonyMux rename.
 
-          ## Verify an installer
+          ## Verify a downloaded asset
 
           ```powershell
+          Get-FileHash .\tonymux-__VERSION__-windows-portable-x64.zip -Algorithm SHA256
           Get-FileHash .\tonymux-__VERSION__-x64-setup.exe -Algorithm SHA256
           ```
 
-          Compare the result with `SHA256SUMS.txt` before installation.
+          Compare the result with `SHA256SUMS.txt` before extraction or installation.
           '@
           $renderedNotes = $releaseNotes.Replace("__VERSION__", $version).Replace("__COMMIT__", $env:GITHUB_SHA)
           $renderedNotes | Set-Content release-notes.md
