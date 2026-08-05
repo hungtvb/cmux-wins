@@ -10,7 +10,10 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $releaseDirectory = Join-Path $repoRoot "src-tauri\target\release"
-$appPath = Join-Path $releaseDirectory "cmux-wins.exe"
+$appCandidates = @(
+    (Join-Path $releaseDirectory "tonymux.exe"),
+    (Join-Path $releaseDirectory "cmux-wins.exe")
+)
 $cliPath = Join-Path $releaseDirectory "cmux-cli.exe"
 
 function Invoke-Cli {
@@ -194,14 +197,15 @@ try {
         }
     }
 
-    if (-not (Test-Path $appPath)) {
-        throw "Desktop executable was not found: $appPath"
+    $appPath = @($appCandidates | Where-Object { Test-Path $_ }) | Select-Object -First 1
+    if (-not $appPath) {
+        throw "Desktop executable was not found. Expected one of: $($appCandidates -join ", ")"
     }
     if (-not (Test-Path $cliPath)) {
         throw "CLI executable was not found: $cliPath"
     }
-    if (Get-Process -Name "cmux-wins" -ErrorAction SilentlyContinue) {
-        throw "Close the running cmux-wins process before this isolated smoke test."
+    if (Get-Process -Name "tonymux", "cmux-wins" -ErrorAction SilentlyContinue) {
+        throw "Close the running TonyMux process before this isolated smoke test."
     }
 
     Write-Host "==> Start automation event smoke" -ForegroundColor Cyan

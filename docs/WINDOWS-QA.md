@@ -40,6 +40,40 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1 -AutomationS
 
 Attach the complete console output to the relevant PR or issue. A local pass does not replace installer QA, DPI/input checks or an eventual CI pass.
 
+## Reproducible evidence bundle
+
+Use the evidence collector on the exact commit and Windows 11 device being tested:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-windows-qa-evidence.ps1 `
+  -InstallerPaths .\TonyMux_0.1.0_x64_en-US.msi, .\TonyMux_0.1.0_x64-setup.exe `
+  -IncludeTerminalAutomation `
+  -IncludeEventAutomation
+```
+
+The command writes a timestamped directory and ZIP under `artifacts\windows-qa`. It records:
+
+- exact Git commit/tree and dirty-state count;
+- privacy-bounded Windows, PowerShell, Git/GitHub CLI and WebView2 versions;
+- SHA-256 hashes for supplied installers and available release binaries;
+- pass/fail/skipped results and complete logs for each requested automated step;
+- before/after TonyMux/shell process and listening-port snapshots;
+- a machine-readable manifest, checksums and a separate unchecked manual checklist.
+
+Useful modes:
+
+```powershell
+# Reuse existing release binaries and skip the compile/test gate
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-windows-qa-evidence.ps1 -SkipBuild
+
+# Run only the compile/test gate; do not launch desktop automation
+powershell -ExecutionPolicy Bypass -File .\scripts\collect-windows-qa-evidence.ps1 -SkipAutomationSmoke
+```
+
+The collector completes the bundle even when a requested automated step fails, then exits non-zero. It scans generated text for common GitHub token and Authorization patterns before declaring the bundle safe to upload. It intentionally does not collect environment variables, arbitrary process command lines, terminal history or credentials.
+
+The generated `manual-checklist.md` remains unchecked. MSI/NSIS install/uninstall, SmartScreen, Vietnamese IME, clipboard, DPI/display, native WebView2 focus/compositor behavior and visual orphan-process review still require a tester.
+
 The ConPTY suite verifies:
 
 - PowerShell process spawn
