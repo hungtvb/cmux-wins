@@ -1,0 +1,62 @@
+name: ChatGPT Materialize Metadata No Window
+
+on:
+  pull_request:
+    branches:
+      - fix/hide-metadata-helper-console
+    paths:
+      - .chatgpt/metadata-no-window.patch
+      - .github/workflows/chatgpt-materialize-metadata-no-window.yml
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Save guarded patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show "${{ github.event.pull_request.head.sha }}:.chatgpt/metadata-no-window.patch" > "$RUNNER_TEMP/metadata-no-window.patch"
+          test -s "$RUNNER_TEMP/metadata-no-window.patch"
+
+      - name: Apply to exact product base and push one clean commit
+        shell: bash
+        env:
+          TARGET_BRANCH: fix/hide-metadata-helper-console
+          EXPECTED_BASE: 32bf70075de4980e924c86f73c80f7d374292387
+          EXPECTED_BLOB: d08c8f3127a258faefbb1b00670b9798d2fdf597
+        run: |
+          set -euo pipefail
+          test "${{ github.event.pull_request.base.sha }}" = "$EXPECTED_BASE"
+
+          remote_sha="$(git ls-remote origin "refs/heads/$TARGET_BRANCH" | awk '{print $1}')"
+          test "$remote_sha" = "$EXPECTED_BASE"
+
+          git checkout --detach "$EXPECTED_BASE"
+          git apply --check "$RUNNER_TEMP/metadata-no-window.patch"
+          git apply "$RUNNER_TEMP/metadata-no-window.patch"
+          git diff --check
+
+          actual_blob="$(git hash-object src-tauri/src/workspace_metadata.rs)"
+          test "$actual_blob" = "$EXPECTED_BLOB"
+
+          git config user.name hungtvb
+          git config user.email 69663872+hungtvb@users.noreply.github.com
+          git add src-tauri/src/workspace_metadata.rs
+          git commit -m "fix: hide workspace metadata helper consoles"
+
+          test "$(git diff-tree --no-commit-id --name-only -r HEAD)" = "src-tauri/src/workspace_metadata.rs"
+          git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+
+          echo "product_commit=$(git rev-parse HEAD)"
+          echo "product_tree=$(git rev-parse HEAD^{tree})"
