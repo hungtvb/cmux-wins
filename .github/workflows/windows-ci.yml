@@ -94,7 +94,7 @@ jobs:
           exit $exitCode
 
       - name: Upload Rust check log
-        if: always()
+        if: always() && steps.cargo-check.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: cargo-check-log

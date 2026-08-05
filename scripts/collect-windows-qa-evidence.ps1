@@ -513,12 +513,12 @@ $stepTable = @($stepResults | ForEach-Object {
     "| $($_.name) | $($_.status.ToUpperInvariant()) | $($_.durationSeconds) | $($_.logFile) |"
 }) -join "`r`n"
 $artifactTable = if ($artifactEvidence.Count -eq 0) {
-    "| — | — | — | — |"
+    "| n/a | n/a | n/a | n/a |"
 }
 else {
     @($artifactEvidence | ForEach-Object {
-        $size = if ($null -eq $_.sizeBytes) { "—" } else { [string]$_.sizeBytes }
-        $hash = if ([string]::IsNullOrWhiteSpace([string]$_.sha256)) { "—" } else { [string]$_.sha256 }
+        $size = if ($null -eq $_.sizeBytes) { "n/a" } else { [string]$_.sizeBytes }
+        $hash = if ([string]::IsNullOrWhiteSpace([string]$_.sha256)) { "n/a" } else { [string]$_.sha256 }
         "| $($_.kind) | $($_.fileName) | $size | $hash |"
     }) -join "`r`n"
 }
