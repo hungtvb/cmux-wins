@@ -9,3 +9,5 @@ src-tauri/gen/
 
 .vscode/
 .idea/
+
+artifacts/windows-qa/

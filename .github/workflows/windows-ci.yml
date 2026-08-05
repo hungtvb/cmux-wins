@@ -74,6 +74,15 @@ jobs:
       - name: Type-check and build frontend
         run: npm run build
 
+      - name: Smoke-test Windows QA evidence collector
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\scripts\collect-windows-qa-evidence.ps1 `
+            -SkipBuild `
+            -SkipAutomationSmoke `
+            -NoArchive `
+            -OutputRoot "$env:RUNNER_TEMP\tonymux-qa-evidence-smoke"
+
       - name: Check Rust backend and binaries
         id: cargo-check
         continue-on-error: true

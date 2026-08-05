@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipNpmInstall,
+    [switch]$SkipBuild,
     [switch]$AutomationSmoke,
     [ValidateRange(10, 180)]
     [int]$StartupTimeoutSeconds = 60
@@ -16,7 +17,10 @@ if ($env:OS -ne "Windows_NT") {
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $manifestPath = Join-Path $repoRoot "src-tauri\Cargo.toml"
 $releaseDirectory = Join-Path $repoRoot "src-tauri\target\release"
-$appPath = Join-Path $releaseDirectory "cmux-wins.exe"
+$appCandidates = @(
+    (Join-Path $releaseDirectory "tonymux.exe"),
+    (Join-Path $releaseDirectory "cmux-wins.exe")
+)
 $cliPath = Join-Path $releaseDirectory "cmux-cli.exe"
 
 function Assert-Command {
@@ -131,45 +135,56 @@ function Wait-ForAutomationUi {
     throw "cmux automation UI was not ready within $StartupTimeoutSeconds seconds. Last result: $lastFailure"
 }
 
-Assert-Command "node"
-Assert-Command "npm"
-Assert-Command "cargo"
-
 Push-Location $repoRoot
 try {
-    if (-not $SkipNpmInstall) {
-        Invoke-Checked "Install frontend dependencies" { npm install }
-    }
+    if (-not $SkipBuild) {
+        Assert-Command "node"
+        Assert-Command "npm"
+        Assert-Command "cargo"
 
-    Invoke-Checked "Frontend tests, type-check and Vite build" { npm run build }
-    Invoke-Checked "Rust check for all targets" {
-        cargo check --manifest-path $manifestPath --all-targets
+        if (-not $SkipNpmInstall) {
+            Invoke-Checked "Install frontend dependencies" { npm install }
+        }
+
+        Invoke-Checked "Frontend tests, type-check and Vite build" { npm run build }
+        Invoke-Checked "Rust check for all targets" {
+            cargo check --manifest-path $manifestPath --all-targets
+        }
+        Invoke-Checked "Rust unit tests" {
+            powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run-rust-unit-tests.ps1") `
+                -ManifestPath $manifestPath
+        }
+        Invoke-Checked "Windows ConPTY integration tests" {
+            cargo test --manifest-path $manifestPath --test conpty_smoke -- --nocapture --test-threads=1
+        }
+        Invoke-Checked "Build release desktop and CLI binaries" {
+            cargo build --manifest-path $manifestPath --release --bins
+        }
     }
-    Invoke-Checked "Rust unit tests" {
-        powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "run-rust-unit-tests.ps1") `
-            -ManifestPath $manifestPath
-    }
-    Invoke-Checked "Windows ConPTY integration tests" {
-        cargo test --manifest-path $manifestPath --test conpty_smoke -- --nocapture --test-threads=1
-    }
-    Invoke-Checked "Build release desktop and CLI binaries" {
-        cargo build --manifest-path $manifestPath --release --bins
+    else {
+        Write-Host "`n==> Skip compile and test gate; use existing release binaries" -ForegroundColor Yellow
     }
 
     if (-not $AutomationSmoke) {
-        Write-Host "`nLocal compile and test verification passed." -ForegroundColor Green
-        Write-Host "Run again with -AutomationSmoke to exercise the named-pipe API against the desktop app."
+        if ($SkipBuild) {
+            Write-Host "`nNo verification step was requested." -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "`nLocal compile and test verification passed." -ForegroundColor Green
+            Write-Host "Run again with -AutomationSmoke to exercise the named-pipe API against the desktop app."
+        }
         return
     }
 
-    if (-not (Test-Path $appPath)) {
-        throw "Desktop executable was not produced: $appPath"
+    $appPath = @($appCandidates | Where-Object { Test-Path $_ }) | Select-Object -First 1
+    if (-not $appPath) {
+        throw "Desktop executable was not produced. Expected one of: $($appCandidates -join ", ")"
     }
     if (-not (Test-Path $cliPath)) {
         throw "CLI executable was not produced: $cliPath"
     }
-    if (Get-Process -Name "cmux-wins" -ErrorAction SilentlyContinue) {
-        throw "A cmux-wins process is already running. Close it before the isolated automation smoke test."
+    if (Get-Process -Name "tonymux", "cmux-wins" -ErrorAction SilentlyContinue) {
+        throw "A TonyMux process is already running. Close it before the isolated automation smoke test."
     }
 
     Write-Host "`n==> Start desktop automation smoke" -ForegroundColor Cyan
