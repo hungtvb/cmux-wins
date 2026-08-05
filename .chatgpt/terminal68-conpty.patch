@@ -1,0 +1,104 @@
+diff --git a/src-tauri/tests/conpty_smoke.rs b/src-tauri/tests/conpty_smoke.rs
+index 847601b..686d1c8 100644
+--- a/src-tauri/tests/conpty_smoke.rs
++++ b/src-tauri/tests/conpty_smoke.rs
+@@ -10,6 +10,7 @@ use std::{
+ };
+ 
+ const READY_MARKER: &str = "CMUX_PTY_READY";
++const CONSOLE_VISIBILITY_MARKER: &str = "CMUX_CONSOLE_VISIBLE_False";
+ const TEST_TIMEOUT: Duration = Duration::from_secs(12);
+ 
+ fn command_exists(command: &str) -> bool {
+@@ -34,7 +35,7 @@ fn wait_for_exit(child: &mut Box<dyn portable_pty::Child + Send + Sync>) -> bool
+     false
+ }
+ 
+-fn run_round_trip(shell: &str) {
++fn run_round_trip(shell: &str, load_profile: bool) {
+     let pty_system = native_pty_system();
+     let pair = pty_system
+         .openpty(PtySize {
+@@ -47,7 +48,9 @@ fn run_round_trip(shell: &str) {
+ 
+     let mut command = CommandBuilder::new(shell);
+     command.arg("-NoLogo");
+-    command.arg("-NoProfile");
++    if !load_profile {
++        command.arg("-NoProfile");
++    }
+ 
+     let mut child = pair
+         .slave
+@@ -90,25 +93,30 @@ fn run_round_trip(shell: &str) {
+         })
+         .expect("unable to resize ConPTY session");
+ 
+-    // Build the marker from character codes so terminal command echo cannot
+-    // produce a false positive for the expected output.
++    // Build both markers from character codes so terminal command echo cannot
++    // produce false positives. The Win32 probe verifies that the console HWND
++    // associated with the PowerShell process is not visible when attached to
++    // ConPTY; a visible HWND would match the external-window regression.
++    let visibility_probe = r#"$sig='[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow(); [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr hWnd);'; Add-Type -MemberDefinition $sig -Name Native -Namespace TonyMux; [Console]::WriteLine((-join (67,77,85,88,95,80,84,89,95,82,69,65,68,89 | ForEach-Object {[char]$_}))); $prefix=(-join (67,77,85,88,95,67,79,78,83,79,76,69,95,86,73,83,73,66,76,69,95 | ForEach-Object {[char]$_})); [Console]::WriteLine($prefix + [TonyMux.Native]::IsWindowVisible([TonyMux.Native]::GetConsoleWindow()))"#;
+     writer
+-        .write_all(
+-            b"[Console]::WriteLine((-join (67,77,85,88,95,80,84,89,95,82,69,65,68,89 | ForEach-Object {[char]$_})))\r\n",
+-        )
++        .write_all(visibility_probe.as_bytes())
++        .and_then(|_| writer.write_all(b"\r\n"))
+         .expect("unable to write command to PTY");
+     writer.flush().expect("unable to flush PTY writer");
+ 
+     let deadline = Instant::now() + TEST_TIMEOUT;
+     let mut observed = Vec::new();
+     let mut marker_seen = false;
++    let mut hidden_console_seen = false;
+ 
+     while Instant::now() < deadline {
+         match output_rx.recv_timeout(Duration::from_millis(250)) {
+             Ok(chunk) => {
+                 observed.extend_from_slice(&chunk);
+-                if String::from_utf8_lossy(&observed).contains(READY_MARKER) {
+-                    marker_seen = true;
++                let output = String::from_utf8_lossy(&observed);
++                marker_seen = output.contains(READY_MARKER);
++                hidden_console_seen = output.contains(CONSOLE_VISIBILITY_MARKER);
++                if marker_seen && hidden_console_seen {
+                     break;
+                 }
+             }
+@@ -141,6 +149,10 @@ fn run_round_trip(shell: &str) {
+         marker_seen,
+         "{shell} did not return the input/output marker. Output: {output_text}"
+     );
++    assert!(
++        hidden_console_seen,
++        "{shell} exposed a visible console window or did not return the visibility probe. Output: {output_text}"
++    );
+     assert!(
+         clean_exit,
+         "{shell} did not exit cleanly within {TEST_TIMEOUT:?}"
+@@ -149,7 +161,12 @@ fn run_round_trip(shell: &str) {
+ 
+ #[test]
+ fn windows_powershell_round_trip_resize_and_exit() {
+-    run_round_trip("powershell.exe");
++    run_round_trip("powershell.exe", false);
++}
++
++#[test]
++fn windows_powershell_profile_round_trip_resize_and_exit() {
++    run_round_trip("powershell.exe", true);
+ }
+ 
+ #[test]
+@@ -159,7 +176,7 @@ fn powershell_7_round_trip_when_available() {
+         return;
+     }
+ 
+-    run_round_trip("pwsh.exe");
++    run_round_trip("pwsh.exe", false);
+ }
+ 
+ #[test]
