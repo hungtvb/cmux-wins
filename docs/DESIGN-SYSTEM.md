@@ -240,7 +240,7 @@ Git, pull-request, port, session, and agent information belongs in contextual ch
 TonyMux remains desktop-first.
 
 - At narrower desktop widths, reduce the sidebar and collapse action text before removing actions.
-- Below the split-pane threshold, panes stack vertically and the pointer resizer is removed.
+- When the workspace stage itself is 620px wide or narrower, panes stack vertically and the pointer resizer is removed. This threshold follows available pane space rather than the outer window width, so hiding the sidebar can preserve a horizontal split.
 - Dialogs switch to one-column forms and wrapped action rows.
 - No mobile bottom navigation, card feed, or dashboard transformation is introduced.
 
