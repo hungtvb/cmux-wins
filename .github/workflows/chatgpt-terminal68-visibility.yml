@@ -1,0 +1,49 @@
+name: ChatGPT Terminal 68 Visibility Fix
+
+on:
+  pull_request:
+    branches:
+      - fix/terminal-session-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'automation/chatgpt-terminal68-visibility-fix-0805'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout head branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply exact patch once
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_base='2acffd771de744091b00f1fcb7fd57c09ca00dd3'
+          expected_result='86d63847b1e9a2dc368b9efde2773da1f4621aaf'
+          current="$(git hash-object src-tauri/src/terminal.rs)"
+          if [[ "$current" == "$expected_result" ]]; then
+            echo 'Patch already materialized.'
+            exit 0
+          fi
+          if [[ "$current" != "$expected_base" ]]; then
+            echo "Unexpected terminal.rs blob: $current" >&2
+            exit 1
+          fi
+          git apply --check .github/transport/terminal68-visibility.patch
+          git apply .github/transport/terminal68-visibility.patch
+          result="$(git hash-object src-tauri/src/terminal.rs)"
+          if [[ "$result" != "$expected_result" ]]; then
+            echo "Unexpected patched blob: $result" >&2
+            exit 1
+          fi
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src-tauri/src/terminal.rs
+          git commit -m 'fix: expose terminal spawn result to Tauri handler'
+          git push origin HEAD:${{ github.head_ref }}
