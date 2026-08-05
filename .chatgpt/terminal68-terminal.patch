@@ -1,0 +1,253 @@
+diff --git a/src-tauri/src/terminal.rs b/src-tauri/src/terminal.rs
+index d1f3218..2acffd7 100644
+--- a/src-tauri/src/terminal.rs
++++ b/src-tauri/src/terminal.rs
+@@ -21,6 +21,7 @@ use std::{
+ use tauri::{AppHandle, Emitter, Manager, State};
+ 
+ const MAX_STARTUP_COMMAND_BYTES: usize = 4 * 1024;
++const MAX_TERMINAL_CLIENT_ID_LENGTH: usize = 128;
+ 
+ #[derive(Clone, Serialize)]
+ #[serde(rename_all = "camelCase")]
+@@ -29,15 +30,45 @@ struct TerminalOutputEvent {
+     data: String,
+ }
+ 
++#[derive(Serialize)]
++#[serde(rename_all = "camelCase")]
++struct SpawnTerminalResult {
++    generation: u64,
++    process_id: Option<u32>,
++    reused: bool,
++}
++
+ struct PtySession {
+     workspace_id: String,
+     process_id: Option<u32>,
+     generation: u64,
++    client_id: Mutex<String>,
+     master: Mutex<Box<dyn MasterPty + Send>>,
+     writer: Mutex<Box<dyn Write + Send>>,
+     child: Mutex<Box<dyn Child + Send + Sync>>,
+ }
+ 
++impl PtySession {
++    fn adopt_client(&self, client_id: &str) -> Result<(), String> {
++        *self
++            .client_id
++            .lock()
++            .map_err(|_| "terminal client lock is poisoned".to_owned())? = client_id.to_owned();
++        Ok(())
++    }
++
++    fn belongs_to_client(&self, client_id: Option<&str>) -> Result<bool, String> {
++        let Some(client_id) = client_id else {
++            return Ok(true);
++        };
++        Ok(*self
++            .client_id
++            .lock()
++            .map_err(|_| "terminal client lock is poisoned".to_owned())?
++            == client_id)
++    }
++}
++
+ impl Drop for PtySession {
+     fn drop(&mut self) {
+         if let Ok(mut child) = self.child.lock() {
+@@ -163,6 +194,41 @@ fn validate_startup_command(command: Option<String>) -> Result<Option<String>, S
+     Ok(Some(command))
+ }
+ 
++fn validate_terminal_client_id(client_id: String) -> Result<String, String> {
++    let client_id = client_id.trim().to_owned();
++    if client_id.is_empty() || client_id.len() > MAX_TERMINAL_CLIENT_ID_LENGTH {
++        return Err(format!(
++            "terminal client id must contain 1 to {MAX_TERMINAL_CLIENT_ID_LENGTH} characters"
++        ));
++    }
++    if !client_id.bytes().all(|value| {
++        value.is_ascii_alphanumeric() || matches!(value, b'-' | b'_' | b':' | b'.')
++    }) {
++        return Err("terminal client id contains unsupported characters".to_owned());
++    }
++    Ok(client_id)
++}
++
++fn session_for_client(
++    state: &AppState,
++    session_id: &str,
++    client_id: Option<&str>,
++) -> Result<Arc<PtySession>, String> {
++    let session = state
++        .sessions
++        .lock()
++        .map_err(|_| "terminal session lock is poisoned".to_owned())?
++        .get(session_id)
++        .cloned()
++        .ok_or_else(|| format!("terminal session not found: {session_id}"))?;
++    if !session.belongs_to_client(client_id)? {
++        return Err(format!(
++            "terminal client no longer owns session: {session_id}"
++        ));
++    }
++    Ok(session)
++}
++
+ fn emit_output(app: &AppHandle, session_id: &str, data: impl Into<String>) {
+     let _ = app.emit(
+         "terminal-output",
+@@ -191,17 +257,25 @@ pub(crate) fn spawn_terminal(
+     shell_profile_id: String,
+     custom_shell_executable: Option<String>,
+     startup_command: Option<String>,
++    client_id: String,
+     cols: u16,
+     rows: u16,
+-) -> Result<(), String> {
+-    {
+-        let sessions = state
+-            .sessions
+-            .lock()
+-            .map_err(|_| "terminal session lock is poisoned".to_owned())?;
+-        if sessions.contains_key(&session_id) {
+-            return Ok(());
+-        }
++) -> Result<SpawnTerminalResult, String> {
++    let client_id = validate_terminal_client_id(client_id)?;
++    // Keep the session map locked until the child has been inserted. The old
++    // check-then-spawn sequence allowed two concurrent frontend effects to
++    // create duplicate shells for the same pane before either one registered.
++    let mut sessions = state
++        .sessions
++        .lock()
++        .map_err(|_| "terminal session lock is poisoned".to_owned())?;
++    if let Some(session) = sessions.get(&session_id) {
++        session.adopt_client(&client_id)?;
++        return Ok(SpawnTerminalResult {
++            generation: session.generation,
++            process_id: session.process_id,
++            reused: true,
++        });
+     }
+ 
+     let mut resolved_shell = resolve_shell(
+@@ -281,16 +355,14 @@ pub(crate) fn spawn_terminal(
+         workspace_id,
+         process_id,
+         generation,
++        client_id: Mutex::new(client_id),
+         master: Mutex::new(pair.master),
+         writer: Mutex::new(writer),
+         child: Mutex::new(child),
+     });
+ 
+-    state
+-        .sessions
+-        .lock()
+-        .map_err(|_| "terminal session lock is poisoned".to_owned())?
+-        .insert(session_id.clone(), session);
++    sessions.insert(session_id.clone(), session);
++    drop(sessions);
+ 
+     publish_terminal_event(
+         &app,
+@@ -422,34 +494,40 @@ pub(crate) fn spawn_terminal(
+         }
+     });
+ 
+-    Ok(())
++    Ok(SpawnTerminalResult {
++        generation,
++        process_id,
++        reused: false,
++    })
+ }
+ 
+ #[tauri::command]
+ pub(crate) fn write_terminal(
+     state: State<'_, AppState>,
+     session_id: String,
++    client_id: Option<String>,
+     data: String,
+ ) -> Result<(), String> {
+-    state
+-        .automation_write_terminal(&session_id, &data)
+-        .map(|_| ())
++    let session = session_for_client(state.inner(), &session_id, client_id.as_deref())?;
++    let mut writer = session
++        .writer
++        .lock()
++        .map_err(|_| "terminal writer lock is poisoned".to_owned())?;
++    writer
++        .write_all(data.as_bytes())
++        .and_then(|_| writer.flush())
++        .map_err(|error| format!("unable to write to terminal: {error}"))
+ }
+ 
+ #[tauri::command]
+ pub(crate) fn resize_terminal(
+     state: State<'_, AppState>,
+     session_id: String,
++    client_id: Option<String>,
+     cols: u16,
+     rows: u16,
+ ) -> Result<(), String> {
+-    let session = state
+-        .sessions
+-        .lock()
+-        .map_err(|_| "terminal session lock is poisoned".to_owned())?
+-        .get(&session_id)
+-        .cloned()
+-        .ok_or_else(|| format!("terminal session not found: {session_id}"))?;
++    let session = session_for_client(state.inner(), &session_id, client_id.as_deref())?;
+ 
+     let resize_result = {
+         let master = session
+@@ -472,12 +550,24 @@ pub(crate) fn close_terminal(
+     app: AppHandle,
+     state: State<'_, AppState>,
+     session_id: String,
++    client_id: Option<String>,
+ ) -> Result<(), String> {
+-    let removed = state
+-        .sessions
+-        .lock()
+-        .map_err(|_| "terminal session lock is poisoned".to_owned())?
+-        .remove(&session_id);
++    let removed = {
++        let mut sessions = state
++            .sessions
++            .lock()
++            .map_err(|_| "terminal session lock is poisoned".to_owned())?;
++        let is_current_client = sessions
++            .get(&session_id)
++            .map(|session| session.belongs_to_client(client_id.as_deref()))
++            .transpose()?
++            .unwrap_or(false);
++        if is_current_client {
++            sessions.remove(&session_id)
++        } else {
++            None
++        }
++    };
+ 
+     if let Some(session) = removed {
+         state.terminal_automation.finish_session(
+@@ -614,4 +704,15 @@ mod tests {
+             validate_startup_command(Some("x".repeat(MAX_STARTUP_COMMAND_BYTES + 1))).is_err()
+         );
+     }
++
++    #[test]
++    fn terminal_client_ids_are_bounded_and_label_safe() {
++        assert_eq!(
++            validate_terminal_client_id("terminal-1:mount.2".to_owned()).as_deref(),
++            Ok("terminal-1:mount.2")
++        );
++        assert!(validate_terminal_client_id("".to_owned()).is_err());
++        assert!(validate_terminal_client_id("terminal/client".to_owned()).is_err());
++        assert!(validate_terminal_client_id("x".repeat(MAX_TERMINAL_CLIENT_ID_LENGTH + 1)).is_err());
++    }
+ }
