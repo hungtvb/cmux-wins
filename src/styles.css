@@ -141,7 +141,7 @@ input:focus-visible {
   background: var(--tm-canvas);
 }
 
-.app-shell--sidebar-closed {
+.app-shell.app-shell--sidebar-closed {
   grid-template-columns: minmax(0, 1fr);
 }
 
