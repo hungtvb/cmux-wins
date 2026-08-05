@@ -187,6 +187,8 @@ jobs:
     needs: check
     runs-on: windows-latest
     timeout-minutes: 35
+    env:
+      TONYMUX_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Checkout
@@ -228,7 +230,7 @@ jobs:
             -CompatibilityCli "${{ runner.temp }}\tonymux-cli\cmux-cli.exe" `
             -OutputDirectory .\artifacts\portable `
             -Version $version `
-            -Commit $env:GITHUB_SHA
+            -Commit $env:TONYMUX_SOURCE_SHA
 
       - name: Verify portable archive reproducibility and contents
         shell: powershell
@@ -247,7 +249,7 @@ jobs:
             -CompatibilityCli "${{ runner.temp }}\tonymux-cli\cmux-cli.exe" `
             -OutputDirectory $repeatOutput `
             -Version $version `
-            -Commit $env:GITHUB_SHA
+            -Commit $env:TONYMUX_SOURCE_SHA
 
           $repeatZips = @(Get-ChildItem $repeatOutput\*.zip)
           if ($repeatZips.Count -ne 1) {
