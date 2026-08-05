@@ -1,0 +1,67 @@
+name: ChatGPT Publish QA Evidence
+
+on:
+  pull_request:
+    branches:
+      - fix/terminal-history-byte-trimming
+    paths:
+      - .github/workflows/chatgpt-publish-qa-evidence.yml
+      - .chatgpt/qa-evidence.patch.b64.part*
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct and verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          transport="$RUNNER_TEMP/qa-evidence.patch.b64"
+          patch="$RUNNER_TEMP/qa-evidence.patch"
+
+          cat .chatgpt/qa-evidence.patch.b64.part* > "$transport"
+          base64 --decode "$transport" > "$patch"
+          test "$(sha256sum "$patch" | awk '{print $1}')" = "e7ee5c5a7c38b94ee77c29086fc7126d5041313d13759d4b9252efa21c1cd928"
+          test -s "$patch"
+
+      - name: Publish guarded product commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$RUNNER_TEMP/qa-evidence.patch"
+          expected_base="2548cc11d6b814abedea71ab1015196809d48a66"
+          expected_tree="2380599a90c51d574cf0d67acf0bfbf10f78d68e"
+          product_branch="feat/windows-qa-evidence-bundle"
+
+          test "${{ github.event.pull_request.base.sha }}" = "$expected_base"
+          git checkout --detach "$expected_base"
+          git switch -C "$product_branch"
+
+          git apply --check "$patch"
+          git apply "$patch"
+          git diff --check
+
+          test ! -e .chatgpt
+          test ! -e .github/workflows/chatgpt-publish-qa-evidence.yml
+
+          git add --all
+          git config user.name "hungtvb"
+          git config user.email "69663872+hungtvb@users.noreply.github.com"
+          git commit -m "test: add Windows QA evidence bundle"
+
+          actual_tree="$(git rev-parse HEAD^{tree})"
+          test "$actual_tree" = "$expected_tree"
+          test "$(git rev-list --count "$expected_base"..HEAD)" = "1"
+
+          git push origin "HEAD:refs/heads/$product_branch"
