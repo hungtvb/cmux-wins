@@ -1,0 +1,85 @@
+name: ChatGPT Materialize Terminal 68 Rust Blobs
+
+on:
+  pull_request:
+    branches:
+      - feat/windows-portable-package
+    paths:
+      - .github/workflows/chatgpt-materialize-terminal68-rust.yml
+      - .chatgpt/terminal68-terminal.patch
+      - .chatgpt/terminal68-conpty.patch
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout temporary transport branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Materialize and publish exact Git blobs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_BASE: 32bf70075de4980e924c86f73c80f7d374292387
+          EXPECTED_TERMINAL_BLOB: 2acffd771de744091b00f1fcb7fd57c09ca00dd3
+          EXPECTED_CONPTY_BLOB: 686d1c8258a760e605aac7c76decbbcf81b3a8f1
+        run: |
+          set -euo pipefail
+
+          transport="$RUNNER_TEMP/terminal68-transport"
+          mkdir -p "$transport"
+          cp .chatgpt/terminal68-terminal.patch "$transport/terminal.patch"
+          cp .chatgpt/terminal68-conpty.patch "$transport/conpty.patch"
+
+          test "${{ github.event.pull_request.base.sha }}" = "$EXPECTED_BASE"
+          git checkout --detach "$EXPECTED_BASE"
+          git apply --check "$transport/terminal.patch" "$transport/conpty.patch"
+          git apply "$transport/terminal.patch" "$transport/conpty.patch"
+          git diff --check
+
+          terminal_blob="$(git hash-object src-tauri/src/terminal.rs)"
+          conpty_blob="$(git hash-object src-tauri/tests/conpty_smoke.rs)"
+          test "$terminal_blob" = "$EXPECTED_TERMINAL_BLOB"
+          test "$conpty_blob" = "$EXPECTED_CONPTY_BLOB"
+
+          publish_blob() {
+            local path="$1"
+            local encoded
+            encoded="$(base64 -w0 "$path")"
+            gh api \
+              --method POST \
+              "repos/$GITHUB_REPOSITORY/git/blobs" \
+              -f content="$encoded" \
+              -f encoding=base64 \
+              --jq .sha
+          }
+
+          remote_terminal_blob="$(publish_blob src-tauri/src/terminal.rs)"
+          remote_conpty_blob="$(publish_blob src-tauri/tests/conpty_smoke.rs)"
+          test "$remote_terminal_blob" = "$EXPECTED_TERMINAL_BLOB"
+          test "$remote_conpty_blob" = "$EXPECTED_CONPTY_BLOB"
+
+          cat > "$RUNNER_TEMP/terminal68-rust-blobs.json" <<JSON
+          {
+            "base": "$EXPECTED_BASE",
+            "src-tauri/src/terminal.rs": "$remote_terminal_blob",
+            "src-tauri/tests/conpty_smoke.rs": "$remote_conpty_blob"
+          }
+          JSON
+          cat "$RUNNER_TEMP/terminal68-rust-blobs.json"
+
+      - name: Upload verified blob manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal68-rust-blobs
+          path: ${{ runner.temp }}/terminal68-rust-blobs.json
+          if-no-files-found: error
+          retention-days: 1
