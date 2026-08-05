@@ -1,0 +1,51 @@
+name: ChatGPT Materialize Portable Files
+
+on:
+  pull_request:
+    branches:
+      - feat/windows-qa-evidence-bundle
+    paths:
+      - .github/workflows/chatgpt-materialize-portable-files.yml
+      - .chatgpt/portable/**
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Reconstruct and verify files
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$RUNNER_TEMP/portable-text-files.tar.gz"
+          cat .chatgpt/portable/part-* | base64 --decode > "$payload"
+          echo "89aaa7adf3b813fb065f9718cc786ceb3317e792116460a4a093a17a13b2d58b  $payload" | sha256sum --check --strict
+          tar -xzf "$payload" -C "$GITHUB_WORKSPACE"
+          test "$(git hash-object docs/RELEASING.md)" = "b4061e989340d46dea91036de4d864570ef19292"
+          test "$(git hash-object docs/WINDOWS-QA.md)" = "44d4caa7dacf28bf80b0521b5aeb3c01babcc452"
+          test "$(git hash-object scripts/package-windows-portable.ps1)" = "47e2cb4ae8a6a95280a66723f3cb828b9a7bc108"
+          git diff --check
+
+      - name: Commit exact materialized files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add docs/RELEASING.md docs/WINDOWS-QA.md scripts/package-windows-portable.ps1
+          if git diff --cached --quiet; then
+            echo "Exact files already materialized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: materialize portable package files"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
