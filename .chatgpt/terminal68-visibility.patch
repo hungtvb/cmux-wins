@@ -1,0 +1,13 @@
+diff --git a/src-tauri/src/terminal.rs b/src-tauri/src/terminal.rs
+index 2acffd7..86d6384 100644
+--- a/src-tauri/src/terminal.rs
++++ b/src-tauri/src/terminal.rs
+@@ -32,7 +32,7 @@ struct TerminalOutputEvent {
+ 
+ #[derive(Serialize)]
+ #[serde(rename_all = "camelCase")]
+-struct SpawnTerminalResult {
++pub(crate) struct SpawnTerminalResult {
+     generation: u64,
+     process_id: Option<u32>,
+     reused: bool,
