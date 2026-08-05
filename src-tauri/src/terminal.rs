@@ -32,7 +32,7 @@ struct TerminalOutputEvent {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct SpawnTerminalResult {
+pub(crate) struct SpawnTerminalResult {
     generation: u64,
     process_id: Option<u32>,
     reused: bool,
