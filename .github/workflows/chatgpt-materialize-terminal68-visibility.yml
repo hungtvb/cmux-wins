@@ -1,0 +1,61 @@
+name: ChatGPT Materialize Terminal 68 Visibility Blob
+
+on:
+  pull_request:
+    branches:
+      - fix/terminal-session-lifecycle
+    paths:
+      - .github/workflows/chatgpt-materialize-terminal68-visibility.yml
+      - .chatgpt/terminal68-visibility.patch
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout temporary transport branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Materialize exact terminal blob
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_BASE: cb0197856b54b9804fd5726f8d6aafe07a98da69
+          EXPECTED_BLOB: 86d63847b1e9a2dc368b9efde2773da1f4621aaf
+        run: |
+          set -euo pipefail
+
+          patch_file="$RUNNER_TEMP/terminal68-visibility.patch"
+          cp .chatgpt/terminal68-visibility.patch "$patch_file"
+
+          test "${{ github.event.pull_request.base.sha }}" = "$EXPECTED_BASE"
+          git checkout --detach "$EXPECTED_BASE"
+          git apply --check "$patch_file"
+          git apply "$patch_file"
+          git diff --check
+
+          blob="$(git hash-object src-tauri/src/terminal.rs)"
+          test "$blob" = "$EXPECTED_BLOB"
+
+          encoded="$(base64 -w0 src-tauri/src/terminal.rs)"
+          remote_blob="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" -f content="$encoded" -f encoding=base64 --jq .sha)"
+          test "$remote_blob" = "$EXPECTED_BLOB"
+
+          printf '{"base":"%s","path":"src-tauri/src/terminal.rs","blob":"%s"}\n' \
+            "$EXPECTED_BASE" "$remote_blob" > "$RUNNER_TEMP/terminal68-visibility-blob.json"
+          cat "$RUNNER_TEMP/terminal68-visibility-blob.json"
+
+      - name: Upload verified blob manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: terminal68-visibility-blob
+          path: ${{ runner.temp }}/terminal68-visibility-blob.json
+          if-no-files-found: error
+          retention-days: 1
