@@ -10,6 +10,10 @@ import {
   type TerminalPaneSettings,
 } from "../settings";
 import { sanitizeTerminalHistory } from "../terminalHistory";
+import {
+  createTerminalClientId,
+  terminalSessionLeases,
+} from "../terminalSessionLease";
 import type { TerminalOutputEvent } from "../types";
 
 type UseTerminalSessionOptions = {
@@ -19,6 +23,7 @@ type UseTerminalSessionOptions = {
   paneSettings?: TerminalPaneSettings;
   restoredHistory?: string;
   historyLineLimit: number;
+  focused: boolean;
   onHistoryChange: (history: string) => void;
   onAttention: (message: string) => void;
   onTitleChange: (title: string) => void;
@@ -56,17 +61,21 @@ export function useTerminalSession({
   paneSettings: providedPaneSettings,
   restoredHistory,
   historyLineLimit,
+  focused,
   onHistoryChange,
   onAttention,
   onTitleChange,
 }: UseTerminalSessionOptions) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const focusedRef = useRef(focused);
   const paneSettingsRef = useRef<TerminalPaneSettings | null>(null);
   const historyLineLimitRef = useRef(historyLineLimit);
   const onHistoryChangeRef = useRef(onHistoryChange);
   const restoredHistoryRef = useRef<string | null>(null);
 
   historyLineLimitRef.current = historyLineLimit;
+  focusedRef.current = focused;
   onHistoryChangeRef.current = onHistoryChange;
 
   if (restoredHistoryRef.current === null) {
@@ -80,6 +89,12 @@ export function useTerminalSession({
       : snapshotTerminalSettings(currentSettings, cwd);
   }
   const paneSettings = paneSettingsRef.current;
+
+  useEffect(() => {
+    if (!focused) return;
+    const frame = window.requestAnimationFrame(() => terminalRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [focused]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -120,13 +135,27 @@ export function useTerminalSession({
     terminal.loadAddon(fitAddon);
     terminal.open(host);
     fitAddon.fit();
+    terminalRef.current = terminal;
+
+    const clientId = createTerminalClientId(sessionId);
+    terminalSessionLeases.claim(sessionId, clientId);
 
     let disposed = false;
     let started = false;
+    let closeScheduled = false;
     let unlisten: UnlistenFn | undefined;
     let notificationBuffer = "";
     let historyCaptureTimer: number | undefined;
     const pendingInput: string[] = [];
+
+    const scheduleOwnedClose = () => {
+      if (closeScheduled) return;
+      closeScheduled = true;
+      queueMicrotask(() => {
+        if (!terminalSessionLeases.release(sessionId, clientId)) return;
+        void invoke("close_terminal", { sessionId, clientId }).catch(() => undefined);
+      });
+    };
 
     const captureHistory = () => {
       historyCaptureTimer = undefined;
@@ -174,6 +203,11 @@ export function useTerminalSession({
         return;
       }
 
+      if (!terminalSessionLeases.owns(sessionId, clientId)) {
+        unlisten();
+        return;
+      }
+
       await invoke("spawn_terminal", {
         workspaceId,
         sessionId,
@@ -181,18 +215,20 @@ export function useTerminalSession({
         shellProfileId: paneSettings.shellProfileId,
         customShellExecutable: paneSettings.customShellExecutable || null,
         startupCommand: paneSettings.startupCommand || null,
+        clientId,
         cols: terminal.cols,
         rows: terminal.rows,
       });
 
-      if (disposed) {
-        await invoke("close_terminal", { sessionId }).catch(() => undefined);
+      if (disposed || !terminalSessionLeases.owns(sessionId, clientId)) {
+        scheduleOwnedClose();
         return;
       }
 
       started = true;
+      if (focusedRef.current) terminal.focus();
       for (const data of pendingInput.splice(0)) {
-        await invoke("write_terminal", { sessionId, data });
+        await invoke("write_terminal", { sessionId, clientId, data });
       }
     };
 
@@ -208,7 +244,7 @@ export function useTerminalSession({
         return;
       }
 
-      void invoke("write_terminal", { sessionId, data }).catch((error) => {
+      void invoke("write_terminal", { sessionId, clientId, data }).catch((error) => {
         if (!disposed) {
           terminal.writeln(`\r\n[TonyMux] Input error: ${String(error)}\r\n`);
         }
@@ -219,6 +255,8 @@ export function useTerminalSession({
       if (title.trim()) onTitleChange(title.trim());
     });
     const writeParsedDisposable = terminal.onWriteParsed(scheduleHistoryCapture);
+    const focusTerminal = () => terminal.focus();
+    host.addEventListener("pointerdown", focusTerminal);
 
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
@@ -226,6 +264,7 @@ export function useTerminalSession({
 
       void invoke("resize_terminal", {
         sessionId,
+        clientId,
         cols: terminal.cols,
         rows: terminal.rows,
       }).catch(() => undefined);
@@ -239,9 +278,11 @@ export function useTerminalSession({
       inputDisposable.dispose();
       titleDisposable.dispose();
       writeParsedDisposable.dispose();
+      host.removeEventListener("pointerdown", focusTerminal);
       unlisten?.();
+      if (terminalRef.current === terminal) terminalRef.current = null;
       terminal.dispose();
-      void invoke("close_terminal", { sessionId }).catch(() => undefined);
+      scheduleOwnedClose();
     };
   }, [onAttention, onTitleChange, paneSettings, sessionId, workspaceId]);
 

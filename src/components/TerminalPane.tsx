@@ -73,6 +73,7 @@ function TerminalPaneComponent({
     paneSettings,
     restoredHistory: initialRestoredHistory,
     historyLineLimit,
+    focused,
     onHistoryChange: handleHistoryChange,
     onAttention: handleAttention,
     onTitleChange: handleTitleChange,
