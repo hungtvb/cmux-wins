@@ -211,6 +211,117 @@ jobs:
       - name: Build MSI and NSIS installers
         run: npm run tauri build
 
+      - name: Download automation CLIs from exact-head check job
+        uses: actions/download-artifact@v4
+        with:
+          name: tonymux-cli-windows-x64
+          path: ${{ runner.temp }}/tonymux-cli
+
+      - name: Package portable Windows build
+        id: portable
+        shell: powershell
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-portable.ps1 `
+            -DesktopExecutable .\src-tauri\target\release\tonymux.exe `
+            -PrimaryCli "${{ runner.temp }}\tonymux-cli\tonymux-cli.exe" `
+            -CompatibilityCli "${{ runner.temp }}\tonymux-cli\cmux-cli.exe" `
+            -OutputDirectory .\artifacts\portable `
+            -Version $version `
+            -Commit $env:GITHUB_SHA
+
+      - name: Verify portable archive reproducibility and contents
+        shell: powershell
+        run: |
+          $zip = "${{ steps.portable.outputs.portable_zip }}"
+          $firstHash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($firstHash -ne "${{ steps.portable.outputs.portable_zip_sha256 }}") {
+            throw "Portable ZIP output hash does not match the packager result"
+          }
+
+          $repeatOutput = Join-Path $env:RUNNER_TEMP "tonymux-portable-repeat"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-portable.ps1 `
+            -DesktopExecutable .\src-tauri\target\release\tonymux.exe `
+            -PrimaryCli "${{ runner.temp }}\tonymux-cli\tonymux-cli.exe" `
+            -CompatibilityCli "${{ runner.temp }}\tonymux-cli\cmux-cli.exe" `
+            -OutputDirectory $repeatOutput `
+            -Version $version `
+            -Commit $env:GITHUB_SHA
+
+          $repeatZips = @(Get-ChildItem $repeatOutput\*.zip)
+          if ($repeatZips.Count -ne 1) {
+            throw "Expected one repeated portable ZIP, found $($repeatZips.Count)"
+          }
+          $repeatHash = (Get-FileHash $repeatZips[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($repeatHash -ne $firstHash) {
+            throw "Portable ZIP is not reproducible. first=$firstHash repeat=$repeatHash"
+          }
+
+          $unicodeSuffix = ([string][char]0x6D4B) + ([string][char]0x8BD5)
+          $extractDirectory = Join-Path $env:RUNNER_TEMP "TonyMux portable $unicodeSuffix"
+          if (Test-Path -LiteralPath $extractDirectory) {
+            Remove-Item -LiteralPath $extractDirectory -Recurse -Force
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extractDirectory -Force
+          $requiredFiles = @(
+            "TonyMux.exe",
+            "tonymux-cli.exe",
+            "cmux-cli.exe",
+            "README-PORTABLE.txt",
+            "PORTABLE-METADATA.json",
+            "SHA256SUMS.txt"
+          )
+          foreach ($fileName in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $extractDirectory $fileName) -PathType Leaf)) {
+              throw "Portable ZIP is missing $fileName"
+            }
+          }
+
+          foreach ($line in Get-Content (Join-Path $extractDirectory "SHA256SUMS.txt")) {
+            if ($line -notmatch '^([0-9a-f]{64})  (.+)$') {
+              throw "Invalid SHA256SUMS.txt line: $line"
+            }
+            $expected = $Matches[1]
+            $fileName = $Matches[2]
+            $filePath = Join-Path $extractDirectory $fileName
+            $actual = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+              throw "Portable checksum mismatch for $fileName"
+            }
+          }
+
+          $movedDirectory = Join-Path $env:RUNNER_TEMP "TonyMux moved $unicodeSuffix"
+          if (Test-Path -LiteralPath $movedDirectory) {
+            Remove-Item -LiteralPath $movedDirectory -Recurse -Force
+          }
+          Move-Item -LiteralPath $extractDirectory -Destination $movedDirectory
+          if (-not (Test-Path -LiteralPath (Join-Path $movedDirectory "TonyMux.exe") -PathType Leaf)) {
+            throw "Portable executable was lost after moving the extracted directory"
+          }
+
+      - name: Smoke-launch portable desktop executable
+        timeout-minutes: 2
+        shell: powershell
+        run: |
+          $unicodeSuffix = ([string][char]0x6D4B) + ([string][char]0x8BD5)
+          $executable = Join-Path $env:RUNNER_TEMP "TonyMux moved $unicodeSuffix\TonyMux.exe"
+          $process = Start-Process -FilePath $executable `
+            -WorkingDirectory (Split-Path -Parent $executable) `
+            -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Portable TonyMux exited during launch smoke with code $($process.ExitCode)"
+            }
+          }
+          finally {
+            if (-not $process.HasExited) {
+              cmd /c "taskkill /PID $($process.Id) /T /F" | Out-Null
+            }
+          }
+
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
@@ -218,5 +329,13 @@ jobs:
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload portable Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: tonymux-windows-portable-x64
+          path: ${{ steps.portable.outputs.portable_zip }}
           if-no-files-found: error
           retention-days: 7
