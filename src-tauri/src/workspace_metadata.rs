@@ -9,6 +9,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+
 const LOCAL_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
 const NETWORK_COMMAND_TIMEOUT: Duration = Duration::from_secs(4);
 const PROCESS_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -93,16 +98,26 @@ fn run_bounded(
     cwd: &Path,
     timeout: Duration,
 ) -> Option<String> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .current_dir(cwd)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GH_PROMPT_DISABLED", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
+        .stderr(Stdio::null());
+
+    #[cfg(windows)]
+    {
+        // TonyMux is a GUI-subsystem process. Without CREATE_NO_WINDOW, every
+        // metadata helper (especially the 15-second powershell.exe process
+        // snapshot) may allocate a visible console window and steal focus from
+        // the embedded terminal. Keep all bounded background helpers hidden.
+        command.creation_flags(CREATE_NO_WINDOW.0);
+    }
+
+    let mut child = command.spawn().ok()?;
 
     let mut stdout = child.stdout.take()?;
     let (output_tx, output_rx) = mpsc::sync_channel(1);
@@ -450,6 +465,40 @@ mod tests {
         assert!(metadata.repository.is_none());
 
         fs::remove_dir_all(directory).expect("unable to remove temporary directory");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bounded_powershell_helper_has_no_visible_console_window() {
+        const SCRIPT: &str = r#"
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class TonyMuxConsoleProbe {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindowVisible(IntPtr window);
+}
+'@
+$window = [TonyMuxConsoleProbe]::GetConsoleWindow()
+if ($window -eq [IntPtr]::Zero) {
+  'none'
+} elseif ([TonyMuxConsoleProbe]::IsWindowVisible($window)) {
+  'visible'
+} else {
+  'hidden'
+}
+"#;
+
+        let result = run_bounded(
+            "powershell.exe",
+            &["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", SCRIPT],
+            &std::env::temp_dir(),
+            Duration::from_secs(10),
+        )
+        .expect("hidden PowerShell helper should return a console-window state");
+
+        assert_ne!(result.trim(), "visible");
     }
 
     #[cfg(windows)]
