@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserPane } from "./components/BrowserPane";
 import { CommandPalette } from "./components/CommandPalette";
 import type { CommandPaletteItem } from "./components/commandPaletteModel";
+import { NotificationPanel } from "./components/NotificationPanel";
 import { ResizablePaneGrid } from "./components/ResizablePaneGrid";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
@@ -9,6 +10,11 @@ import { WorkspaceTopbar } from "./components/WorkspaceTopbar";
 import { useAutomationBridge } from "./hooks/useAutomationBridge";
 import { useAutomationEventPublisher } from "./hooks/useAutomationEventPublisher";
 import { useWorkspaceMetadata } from "./hooks/useWorkspaceMetadata";
+import {
+  buildNotificationItems,
+  countAttention,
+  type NotificationItem,
+} from "./notificationModel";
 import type { AppSettings } from "./settings";
 import { requestOpenSettings } from "./settingsEvents";
 import {
@@ -57,6 +63,7 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
     () => initialState.splitRatioByWorkspace,
   );
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const metadataByWorkspace = useWorkspaceMetadata(workspaces, activeWorkspaceId);
 
@@ -316,6 +323,46 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
     );
   }, [activeWorkspace]);
 
+  const clearPaneAttention = useCallback(
+    (paneId: string) => {
+      const remaining = Object.fromEntries(
+        Object.entries(attention).filter(([id]) => id !== paneId),
+      );
+      setAttention(remaining);
+      setWorkspaces((current) =>
+        current.map((workspace) => {
+          if (!workspace.panes.some((pane) => pane.id === paneId)) return workspace;
+          const stillUnread = workspace.panes.some(
+            (pane) => pane.id !== paneId && remaining[pane.id],
+          );
+          return { ...workspace, unread: stillUnread };
+        }),
+      );
+    },
+    [attention],
+  );
+
+  const clearAllNotifications = useCallback(() => {
+    setAttention({});
+    setWorkspaces((current) => current.map((workspace) => ({ ...workspace, unread: false })));
+  }, []);
+
+  const jumpToNotification = useCallback(
+    (item: NotificationItem) => {
+      selectWorkspace(item.workspaceId);
+      setActivePaneByWorkspace((current) => ({ ...current, [item.workspaceId]: item.paneId }));
+      clearPaneAttention(item.paneId);
+      setNotificationsOpen(false);
+    },
+    [clearPaneAttention, selectWorkspace],
+  );
+
+  const notificationItems = useMemo(
+    () => buildNotificationItems(attention, workspaces),
+    [attention, workspaces],
+  );
+  const unreadNotificationCount = useMemo(() => countAttention(attention), [attention]);
+
   const shortcutLabel = useCallback(
     (actionId: ShortcutActionId): string | undefined => {
       const binding = settings.shortcuts[actionId];
@@ -384,6 +431,15 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
         shortcut: shortcutLabel("layout.toggleSidebar"),
         run: () => setSidebarOpen((open) => !open),
       },
+      {
+        id: "notifications.toggle",
+        label: notificationsOpen ? "Hide notifications" : "Show notifications",
+        description: "Open the agent attention panel",
+        keywords: ["attention", "notification", "unread", "panel"],
+        section: "View",
+        shortcut: shortcutLabel("notifications.toggle"),
+        run: () => setNotificationsOpen((open) => !open),
+      },
     ];
 
     if (activeWorkspace && activeWorkspace.panes.some((pane) => Boolean(attention[pane.id]))) {
@@ -418,6 +474,7 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
     attention,
     clearAttention,
     closeWorkspace,
+    notificationsOpen,
     selectWorkspace,
     shortcutLabel,
     sidebarOpen,
@@ -458,6 +515,9 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
       } else if (shortcutMatchesEvent(settings.shortcuts["pane.splitTerminal"], event)) {
         event.preventDefault();
         splitTerminalPane();
+      } else if (shortcutMatchesEvent(settings.shortcuts["notifications.toggle"], event)) {
+        event.preventDefault();
+        setNotificationsOpen((open) => !open);
       } else if (
         activeWorkspace &&
         shortcutMatchesEvent(settings.shortcuts["workspace.close"], event)
@@ -502,7 +562,8 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
           workspace={activeWorkspace}
           metadata={activeMetadata}
           sidebarOpen={sidebarOpen}
-          attentionCount={activeWorkspace.panes.filter((pane) => Boolean(attention[pane.id])).length}
+          unreadCount={unreadNotificationCount}
+          notificationsOpen={notificationsOpen}
           onToggleSidebar={() => setSidebarOpen((open) => !open)}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
           onOpenSettings={requestOpenSettings}
@@ -510,9 +571,19 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
           onAddWorkspace={addWorkspace}
           onSplitTerminal={splitTerminalPane}
           onAddBrowser={addBrowserPane}
-          onClearAttention={clearAttention}
+          onToggleNotifications={() => setNotificationsOpen((open) => !open)}
           onCloseWorkspace={() => closeWorkspace(activeWorkspace.id)}
         />
+
+        {notificationsOpen && (
+          <NotificationPanel
+            items={notificationItems}
+            onJump={jumpToNotification}
+            onClearPane={clearPaneAttention}
+            onClearAll={clearAllNotifications}
+            onClose={() => setNotificationsOpen(false)}
+          />
+        )}
 
         <div className="workspace-stage">
           {workspaces.map((workspace) => {

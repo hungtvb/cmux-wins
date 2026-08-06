@@ -281,6 +281,14 @@ Git, pull-request, port, session, and agent information belongs in contextual ch
 - Group by Workspace, Pane, Application, and Destructive.
 - Selected commands use a flat Lime-tinted state; destructive commands keep red semantics.
 
+### `NotificationPanel`
+
+- Fixed popover below the topbar (right-aligned, 340px, max-height capped to viewport).
+- Rows carry workspace / pane context and the agent message; the row itself is the jump-to-pane target.
+- Unread count badge lives on the topbar Bell control; the panel marks an item read when its row is dismissed or jumped to.
+- Escape closes; empty state uses muted text with the BellOff glyph.
+- Uses elevated surface (`--tm-surface-1`) with a shadow — popover semantics per the elevation rule.
+
 ### `SettingsDialog`
 
 - Group settings by Shells, Terminal, Keyboard shortcuts, Persistence, Trusted executables, and Import/Export/Recovery.

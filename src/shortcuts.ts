@@ -1,6 +1,7 @@
 export const SHORTCUT_ACTIONS = [
   { id: "settings.open", label: "Open settings", description: "Open the TonyMux settings dialog", section: "General", defaultBinding: "Ctrl+Comma" },
   { id: "commandPalette.open", label: "Open command palette", description: "Search and run TonyMux actions", section: "General", defaultBinding: "Ctrl+KeyK" },
+  { id: "notifications.toggle", label: "Show notifications", description: "Open the agent attention panel", section: "General", defaultBinding: "Ctrl+Shift+KeyU" },
   { id: "workspace.new", label: "New workspace", description: "Create a local developer workspace", section: "Workspace", defaultBinding: "Ctrl+KeyN" },
   { id: "workspace.close", label: "Close workspace", description: "Close the active workspace and its panes", section: "Workspace", defaultBinding: "Ctrl+Shift+KeyW" },
   { id: "pane.splitTerminal", label: "Split terminal", description: "Add another terminal pane", section: "Panes", defaultBinding: "Ctrl+Shift+KeyD" },

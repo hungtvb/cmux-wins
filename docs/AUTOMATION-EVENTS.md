@@ -102,7 +102,7 @@ Unknown fields are rejected.
 - `attention.requested`
 - `attention.cleared`
 
-Attention events are derived from the same React state used to render pane rings and workspace unread indicators. OSC 9/99/777 notifications therefore flow into the event journal without a second parser.
+Attention events are derived from the same React state used to render pane rings and workspace unread indicators. OSC 9/99/777 notifications therefore flow into the event journal without a second parser. The notification panel (`NotificationPanel.tsx`) renders from that same attention state via `buildNotificationItems` — it is a view, not a second source of truth.
 
 ### Terminal lifecycle
 

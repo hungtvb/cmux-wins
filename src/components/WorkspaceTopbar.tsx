@@ -1,5 +1,5 @@
 import {
-  BellOff,
+  Bell,
   Columns2,
   FolderPlus,
   GitBranch,
@@ -22,7 +22,8 @@ type WorkspaceTopbarProps = {
   workspace: Workspace;
   metadata?: WorkspaceMetadata;
   sidebarOpen: boolean;
-  attentionCount: number;
+  unreadCount: number;
+  notificationsOpen: boolean;
   onToggleSidebar: () => void;
   onOpenCommandPalette: () => void;
   onOpenSettings: () => void;
@@ -30,7 +31,7 @@ type WorkspaceTopbarProps = {
   onAddWorkspace: () => void;
   onSplitTerminal: () => void;
   onAddBrowser: () => void;
-  onClearAttention: () => void;
+  onToggleNotifications: () => void;
   onCloseWorkspace: () => void;
 };
 
@@ -57,7 +58,8 @@ export function WorkspaceTopbar({
   workspace,
   metadata,
   sidebarOpen,
-  attentionCount,
+  unreadCount,
+  notificationsOpen,
   onToggleSidebar,
   onOpenCommandPalette,
   onOpenSettings,
@@ -65,7 +67,7 @@ export function WorkspaceTopbar({
   onAddWorkspace,
   onSplitTerminal,
   onAddBrowser,
-  onClearAttention,
+  onToggleNotifications,
   onCloseWorkspace,
 }: WorkspaceTopbarProps) {
   const hasGitMetadata = Boolean(metadata?.available);
@@ -148,15 +150,20 @@ export function WorkspaceTopbar({
             <Globe2 size={15} />
           </button>
           <button
-            className={`toolbar-button toolbar-button--compact${attentionCount > 0 ? " toolbar-button--attention" : ""}`}
+            className={`toolbar-button toolbar-button--compact${unreadCount > 0 ? " toolbar-button--attention" : ""}${notificationsOpen ? " toolbar-button--active" : ""}`}
             type="button"
-            onClick={onClearAttention}
-            title={attentionCount > 0 ? `Mark ${attentionCount} alert${attentionCount === 1 ? "" : "s"} as read` : "No unread alerts"}
-            aria-label="Mark workspace alerts as read"
-            disabled={attentionCount === 0}
+            onClick={onToggleNotifications}
+            title={titleWithShortcut(
+              unreadCount > 0
+                ? `${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}`
+                : "No unread notifications",
+              "notifications.toggle",
+            )}
+            aria-label="Toggle notifications panel"
+            aria-expanded={notificationsOpen}
           >
-            <BellOff size={15} />
-            {attentionCount > 0 && <span className="toolbar-button__badge">{attentionCount}</span>}
+            <Bell size={15} />
+            {unreadCount > 0 && <span className="toolbar-button__badge">{unreadCount}</span>}
           </button>
         </div>
 
