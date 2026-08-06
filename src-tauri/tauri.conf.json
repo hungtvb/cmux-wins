@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "cmux Windows",
+  "productName": "TonyMux",
   "version": "0.1.0",
   "identifier": "com.hungtvb.cmuxwins",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "cmux Windows",
+        "title": "TonyMux",
         "width": 1440,
         "height": 900,
         "minWidth": 900,
@@ -33,6 +33,6 @@
     "targets": ["msi", "nsis"],
     "icon": ["icons/icon.ico"],
     "shortDescription": "Terminal workspaces for AI coding agents on Windows 11",
-    "longDescription": "A Windows 11 port of the cmux workflow with workspaces, split terminal panes, and agent attention notifications."
+    "longDescription": "TonyMux brings the cmux-inspired workspace workflow to Windows with terminal panes, browser surfaces, development metadata, and local agent automation."
   }
 }

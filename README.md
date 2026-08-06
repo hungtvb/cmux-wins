@@ -1,46 +1,39 @@
-# cmux Windows
+# TonyMux
 
-A Windows 11 port of the core [cmux](https://github.com/manaflow-ai/cmux) workflow: vertical workspaces, split terminal panes, and agent-attention notifications.
+**TonyMux** is a Windows 11 developer workspace for terminal-driven and AI-assisted workflows. It brings the useful workspace model popularized by [cmux](https://github.com/manaflow-ai/cmux) to Windows using Tauri, React, xterm.js, Rust, WebView2 and ConPTY.
 
-The upstream application is native macOS software built with Swift, AppKit, and GhosttyKit. This project is therefore a platform port, not a direct recompilation. The Windows shell uses Tauri, React, xterm.js, Rust, and the Windows ConPTY API through `portable-pty`.
+TonyMux is a platform port and independent Windows implementation, not a direct recompilation of the macOS application.
 
-## MVP scope
+## Current capabilities
 
-Implemented on `feat/windows-mvp`:
+- Versioned workspace persistence with previous-generation recovery
+- Multiple ConPTY terminal panes
+- Native WebView2 browser panes
+- Git branch, dirty state, pull request and listening-port metadata
+- Agent-attention notifications from OSC 9/99/777
+- Current-user named-pipe automation API
+- Workspace, pane, terminal and event automation
+- Searchable `Ctrl+K` command palette
+- Versioned Settings UI with allowlisted shell profiles
+- MSI and NSIS Windows installers
 
-- Native Windows desktop shell through Tauri/WebView2
-- Vertical workspace sidebar
-- Multiple persistent workspaces
-- PowerShell terminals backed by ConPTY
-- Split terminal panes
-- Terminal resize and process cleanup
-- Workspace close lifecycle with PTY cleanup
-- Keyboard shortcuts for common workspace actions
-- OSC 9/99/777 agent-attention detection
-- Per-pane attention ring and unread workspace indicator
-- MSI and NSIS bundle configuration
-- Windows CI for frontend, Rust, and installer artifacts
+The repository is delivered through stacked pull requests. Do not merge a stacked PR before its base PR.
 
-Not implemented yet:
+## Design system
 
-- Embedded browser panes and browser automation
-- Git branch, pull request, and listening-port metadata
-- SSH workspace orchestration
-- Session scrollback restoration
-- Settings UI and keyboard shortcut editor
-- Ghostty renderer/config compatibility
+TonyMux uses the **Quiet Operator** design direction: a dark, low-distraction Windows developer workspace where terminal and browser content remain dominant, blue represents focus and selection, and violet is reserved for agent attention that requires human input.
+
+See [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) before designing, reviewing, or implementing UI changes. It is the project baseline for layout, tokens, component states, accessibility, and future visual adoption.
 
 ## Prerequisites
 
-Install these on Windows 11:
+Install on Windows 11:
 
 1. Git
 2. Node.js 20 or newer
 3. Rust stable with the MSVC toolchain
-4. Microsoft Visual Studio Build Tools 2022 with **Desktop development with C++**
+4. Visual Studio Build Tools 2022 with **Desktop development with C++**
 5. Microsoft Edge WebView2 Runtime
-
-Using `winget`:
 
 ```powershell
 winget install --id Git.Git -e
@@ -50,20 +43,19 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools -e
 winget install --id Microsoft.EdgeWebView2Runtime -e
 ```
 
-Open Visual Studio Installer after installing Build Tools and enable **Desktop development with C++**.
-
 ## Run in development
+
+The GitHub repository keeps its current name until the stacked PR chain is resolved:
 
 ```powershell
 git clone https://github.com/hungtvb/cmux-wins.git
 cd cmux-wins
-git switch feat/windows-mvp
-
+git switch feat/session-persistence
 npm install
 npm run tauri dev
 ```
 
-The default shell is Windows PowerShell. Override it before launching when needed:
+The default shell is Windows PowerShell. `CMUX_SHELL` remains the supported override during the compatibility period:
 
 ```powershell
 $env:CMUX_SHELL = "pwsh.exe"
@@ -72,38 +64,78 @@ npm run tauri dev
 
 ## Keyboard shortcuts
 
+These are the defaults. Every binding can be changed or unassigned in **Settings → Keyboard shortcuts**; TonyMux blocks duplicate assignments and uses physical key codes so bindings remain stable across keyboard layouts.
+
 | Shortcut | Action |
 |---|---|
+| `Ctrl+K` | Open command palette |
+| `Ctrl+,` | Open Settings |
 | `Ctrl+N` | Create workspace |
 | `Ctrl+1` … `Ctrl+9` | Switch workspace |
 | `Ctrl+B` | Toggle sidebar |
-| `Ctrl+Shift+D` | Split current workspace |
+| `Ctrl+Shift+B` | Add browser pane |
+| `Ctrl+Shift+D` | Split terminal |
 | `Ctrl+Shift+W` | Close current workspace |
 
-## Build installers
+## Settings
+
+Settings are versioned, importable and exportable. Shell executable selection is validated again in Rust and limited to Windows PowerShell, PowerShell 7, Command Prompt and WSL. Shortcut bindings are conflict-checked and apply immediately; terminal profile changes apply to new panes without restarting existing sessions.
+
+See [`docs/SETTINGS.md`](docs/SETTINGS.md) and [`docs/SESSION-PERSISTENCE.md`](docs/SESSION-PERSISTENCE.md).
+
+## Build and verify
 
 ```powershell
 npm install
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 npm run tauri build
 ```
 
-Generated MSI and NSIS installers are written under `src-tauri\target\release\bundle`.
+The installer workflow publishes the `tonymux-windows-installers` artifact.
 
-The Windows CI workflow also uploads both installers as the `cmux-windows-installers` artifact after the compile checks pass.
-
-## Agent notification smoke test
-
-Run this inside a cmux Windows terminal pane:
+For the full Windows verification harness:
 
 ```powershell
-Write-Host "`e]9;Agent requires approval`a" -NoNewline
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-local.ps1 -AutomationSmoke
 ```
 
-The pane should receive a blue attention ring. If the workspace is not active, its sidebar item should show an unread bell.
+## Automation CLI
 
-## Architecture
+Build both the TonyMux CLI and the temporary compatibility alias:
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the platform mapping and delivery phases.
+```powershell
+cargo build --manifest-path src-tauri/Cargo.toml --release --bin tonymux-cli --bin cmux-cli
+```
+
+Use the new command name:
+
+```powershell
+.\src-tauri\target\release\tonymux-cli.exe ping
+.\src-tauri\target\release\tonymux-cli.exe info
+.\src-tauri\target\release\tonymux-cli.exe workspace list
+.\src-tauri\target\release\tonymux-cli.exe workspace create "Agent work" --cwd C:\code\project
+.\src-tauri\target\release\tonymux-cli.exe pane terminal <workspace-id>
+.\src-tauri\target\release\tonymux-cli.exe pane browser <workspace-id> https://example.com
+.\src-tauri\target\release\tonymux-cli.exe terminal run <session-id> "Write-Output ok"
+.\src-tauri\target\release\tonymux-cli.exe event read --wait-ms 30000
+```
+
+`cmux-cli.exe` remains available as a deprecated alias so existing scripts keep working during the rename.
+
+## Compatibility during the rename
+
+To preserve upgrades, existing workspaces and automation clients, these internal identifiers intentionally remain unchanged for now:
+
+- Tauri application identifier: `com.hungtvb.cmuxwins`
+- Legacy workspace localStorage keys and `tonymux.workspaces.v3/v4*` migrate into the bounded `tonymux.workspaces.v5` envelope
+- Automation config: `%LOCALAPPDATA%\cmux-windows\automation-v1.json`
+- Custom executable identity store: `%LOCALAPPDATA%\cmux-windows\trusted-shells-v2.json` (path-only v1 decisions are not migrated)
+- Named pipe prefix: `cmux-windows-v1-*`
+- Shell override: `CMUX_SHELL`
+
+See [`docs/BRANDING.md`](docs/BRANDING.md) for the migration policy.
 
 ## License
 

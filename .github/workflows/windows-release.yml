@@ -4,14 +4,6 @@ on:
   push:
     tags:
       - "v*"
-  pull_request:
-    branches: [main]
-    paths:
-      - ".github/workflows/windows-release.yml"
-      - "package.json"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/tauri.conf.json"
-      - "src-tauri/icons/**"
   workflow_dispatch:
 
 permissions:
@@ -98,6 +90,21 @@ jobs:
       - name: Build MSI and NSIS installers
         run: npm run tauri build
 
+      - name: Build automation CLIs
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin tonymux-cli --bin cmux-cli
+
+      - name: Package portable Windows build
+        id: portable
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-portable.ps1 `
+            -DesktopExecutable .\src-tauri\target\release\tonymux.exe `
+            -PrimaryCli .\src-tauri\target\release\tonymux-cli.exe `
+            -CompatibilityCli .\src-tauri\target\release\cmux-cli.exe `
+            -OutputDirectory .\portable-output `
+            -Version "${{ steps.version.outputs.version }}" `
+            -Commit $env:GITHUB_SHA
+
       - name: Prepare versioned release assets
         shell: pwsh
         run: |
@@ -110,10 +117,13 @@ jobs:
             throw "Expected both MSI and NSIS installers"
           }
 
-          Copy-Item $msi.FullName "release-assets/cmux-windows-$version-x64.msi"
-          Copy-Item $nsis.FullName "release-assets/cmux-windows-$version-x64-setup.exe"
+          Copy-Item $msi.FullName "release-assets/tonymux-$version-x64.msi"
+          Copy-Item $nsis.FullName "release-assets/tonymux-$version-x64-setup.exe"
+          Copy-Item "${{ steps.portable.outputs.portable_zip }}" `
+            "release-assets/tonymux-$version-windows-portable-x64.zip"
 
           [ordered]@{
+            product = "TonyMux"
             version = $version
             tag = "${{ steps.version.outputs.tag }}"
             commit = $env:GITHUB_SHA
@@ -131,11 +141,12 @@ jobs:
             } | Set-Content release-assets/SHA256SUMS.txt
 
           $releaseNotes = @'
-          # cmux Windows v__VERSION__
+          # TonyMux v__VERSION__
 
           Automated Windows build produced from commit `__COMMIT__`.
 
           ## Assets
+          - x64 portable ZIP (extract and run `TonyMux.exe`)
           - x64 MSI installer
           - x64 NSIS setup executable
           - SHA-256 checksum manifest
@@ -144,15 +155,16 @@ jobs:
           ## Known limitations
           - Installers are not Authenticode-signed yet and may trigger Windows SmartScreen.
           - Interactive Windows 11 QA evidence is tracked in issue #2.
-          - Browser panes, Git/PR metadata, SSH, session restore and the local automation API remain on roadmap issue #12.
+          - The legacy `cmux-cli.exe`, named pipe and local automation config path remain available for compatibility during the TonyMux rename.
 
-          ## Verify an installer
+          ## Verify a downloaded asset
 
           ```powershell
-          Get-FileHash .\cmux-windows-__VERSION__-x64-setup.exe -Algorithm SHA256
+          Get-FileHash .\tonymux-__VERSION__-windows-portable-x64.zip -Algorithm SHA256
+          Get-FileHash .\tonymux-__VERSION__-x64-setup.exe -Algorithm SHA256
           ```
 
-          Compare the result with `SHA256SUMS.txt` before installation.
+          Compare the result with `SHA256SUMS.txt` before extraction or installation.
           '@
           $renderedNotes = $releaseNotes.Replace("__VERSION__", $version).Replace("__COMMIT__", $env:GITHUB_SHA)
           $renderedNotes | Set-Content release-notes.md
@@ -160,7 +172,7 @@ jobs:
       - name: Upload immutable workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cmux-windows-${{ steps.version.outputs.version }}-x64-${{ steps.version.outputs.publish == 'true' && 'release' || 'dry-run' }}
+          name: tonymux-${{ steps.version.outputs.version }}-x64-${{ steps.version.outputs.publish == 'true' && 'release' || 'dry-run' }}
           path: release-assets/*
           if-no-files-found: error
           retention-days: 30
@@ -172,7 +184,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
-          $title = "cmux Windows $tag"
+          $title = "TonyMux $tag"
           $assets = Get-ChildItem release-assets -File | ForEach-Object { $_.FullName }
           $isPrerelease = $tag -match '-(alpha|beta|rc)(\.|$)'
 

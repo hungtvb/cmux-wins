@@ -1,0 +1,37 @@
+.workspace-item:has(.workspace-item__metadata) {
+  min-height: 84px;
+}
+
+.workspace-item__metadata {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--tm-text-muted);
+  font-family: var(--tm-font-mono);
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.workspace-item__metadata > span {
+  display: inline-flex;
+  min-width: 0;
+  height: 18px;
+  align-items: center;
+  gap: 3px;
+  padding: 0 5px;
+  border: 1px solid var(--tm-border-subtle);
+  border-radius: 4px;
+  background: var(--tm-surface-1);
+}
+
+.workspace-item__metadata > span:first-child {
+  color: var(--tm-text);
+}
+
+.workspace-item--active .workspace-item__metadata > span {
+  border-color: var(--tm-border-default);
+  background: var(--tm-surface-2);
+}

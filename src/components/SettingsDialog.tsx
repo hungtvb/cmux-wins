@@ -1,0 +1,1316 @@
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Database,
+  Download,
+  Keyboard,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Settings2,
+  ShieldCheck,
+  ShieldX,
+  TerminalSquare,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
+import {
+  DEFAULT_SETTINGS,
+  MAX_CUSTOM_SHELL_PROFILES,
+  SHELL_PROFILES,
+  countCustomShellProfilesUsingExecutable,
+  exportSettings,
+  findCustomShellProfile,
+  importSettings,
+  normalizeCustomShellExecutable,
+  normalizeSettings,
+  validateCustomShellExecutable,
+  validateSettings,
+  type AppSettings,
+  type CustomShellProfile,
+  type CursorStyle,
+} from "../settings";
+import {
+  DEFAULT_SHORTCUT_BINDINGS,
+  SHORTCUT_ACTIONS,
+  findShortcutConflict,
+  formatShortcutBinding,
+  getShortcutAction,
+  shortcutFromKeyboardEvent,
+  type ShortcutActionId,
+} from "../shortcuts";
+import { MAX_TERMINAL_HISTORY_LINES } from "../terminalHistory";
+
+type SettingsDialogProps = {
+  open: boolean;
+  settings: AppSettings;
+  onSave: (settings: AppSettings) => void;
+  onClearWorkspaceState: () => void;
+  onClose: () => void;
+};
+
+function cloneSettings(settings: AppSettings): AppSettings {
+  return {
+    ...settings,
+    customShellProfiles: settings.customShellProfiles.map((profile) => ({ ...profile })),
+    terminal: { ...settings.terminal },
+    persistence: { ...settings.persistence },
+    shortcuts: { ...settings.shortcuts },
+  };
+}
+
+type TrustedExecutableStatus = "trusted" | "changed" | "missing" | "unavailable";
+
+type TrustedExecutableSnapshot = {
+  executable: string;
+  sha256: string;
+  sizeBytes: number;
+  status: TrustedExecutableStatus;
+  detail: string | null;
+};
+
+type TrustedShellStoreSnapshot = {
+  healthy: boolean;
+  error: string | null;
+  entries: TrustedExecutableSnapshot[];
+};
+
+type TrustState = {
+  store: TrustedShellStoreSnapshot;
+  profiles: Record<string, boolean>;
+};
+
+const EMPTY_TRUST_STORE: TrustedShellStoreSnapshot = {
+  healthy: true,
+  error: null,
+  entries: [],
+};
+
+async function queryTrustState(profiles: CustomShellProfile[]): Promise<TrustState> {
+  const [store, profileEntries] = await Promise.all([
+    invoke<TrustedShellStoreSnapshot>("get_trusted_shell_store").catch((cause) => ({
+      healthy: false,
+      error: String(cause),
+      entries: [],
+    })),
+    Promise.all(
+      profiles.map(async (profile) => {
+        if (validateCustomShellExecutable(profile.executable)) {
+          return [profile.id, false] as const;
+        }
+        try {
+          const trusted = await invoke<boolean>("is_shell_executable_trusted", {
+            executable: profile.executable,
+          });
+          return [profile.id, trusted] as const;
+        } catch {
+          return [profile.id, false] as const;
+        }
+      }),
+    ),
+  ]);
+  return { store, profiles: Object.fromEntries(profileEntries) };
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (const nextUnit of units.slice(1)) {
+    if (value < 1024) break;
+    value /= 1024;
+    unit = nextUnit;
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
+}
+
+export function SettingsDialog({
+  open,
+  settings,
+  onSave,
+  onClearWorkspaceState,
+  onClose,
+}: SettingsDialogProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const historyHelpId = useId();
+  const shortcutsHelpId = useId();
+  const shortcutsStatusId = useId();
+  const trustStoreStatusId = useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const errorSummaryRef = useRef<HTMLDivElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const trustQueryGenerationRef = useRef(0);
+  const [draft, setDraft] = useState(() => cloneSettings(settings));
+  const draftRef = useRef(draft);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [recordingActionId, setRecordingActionId] = useState<ShortcutActionId | null>(null);
+  const [shortcutError, setShortcutError] = useState("");
+  const [trustedExecutables, setTrustedExecutables] = useState<Record<string, boolean>>({});
+  const [trustStore, setTrustStore] = useState<TrustedShellStoreSnapshot>(EMPTY_TRUST_STORE);
+  const [trustStoreLoading, setTrustStoreLoading] = useState(false);
+  const [trustPendingId, setTrustPendingId] = useState<string | null>(null);
+  const [trustStorePendingPath, setTrustStorePendingPath] = useState<string | null>(null);
+  const [trustStatus, setTrustStatus] = useState("");
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    if (!open) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      requestAnimationFrame(() => returnFocusRef.current?.focus());
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || errors.length === 0) return;
+    requestAnimationFrame(() => errorSummaryRef.current?.focus());
+  }, [errors, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let disposed = false;
+    setDraft(cloneSettings(settings));
+    setErrors([]);
+    setNotice("");
+    setSaving(false);
+    setRecordingActionId(null);
+    setShortcutError("");
+    setTrustPendingId(null);
+    setTrustStorePendingPath(null);
+    setTrustStoreLoading(true);
+    setTrustStatus("");
+    const trustQueryGeneration = ++trustQueryGenerationRef.current;
+    void queryTrustState(settings.customShellProfiles).then((trustState) => {
+      if (!disposed && trustQueryGeneration === trustQueryGenerationRef.current) {
+        setTrustedExecutables(trustState.profiles);
+        setTrustStore(trustState.store);
+        setTrustStoreLoading(false);
+      }
+    });
+    requestAnimationFrame(() => {
+      dialogRef.current
+        ?.querySelector<HTMLElement>(
+          'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), select:not([disabled]):not([tabindex="-1"])',
+        )
+        ?.focus();
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [open, settings]);
+
+  if (!open) return null;
+
+  const updateTerminal = <Key extends keyof AppSettings["terminal"]>(
+    key: Key,
+    value: AppSettings["terminal"][Key],
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      terminal: { ...current.terminal, [key]: value },
+    }));
+  };
+
+  const refreshTrustState = async (
+    profiles: CustomShellProfile[] = draftRef.current.customShellProfiles,
+    successMessage?: string,
+  ) => {
+    const generation = ++trustQueryGenerationRef.current;
+    setTrustStoreLoading(true);
+    const trustState = await queryTrustState(profiles);
+    if (generation !== trustQueryGenerationRef.current) return;
+    setTrustedExecutables(trustState.profiles);
+    setTrustStore(trustState.store);
+    setTrustStoreLoading(false);
+    if (successMessage) setTrustStatus(successMessage);
+  };
+
+  const addCustomShellProfile = () => {
+    if (draft.customShellProfiles.length >= MAX_CUSTOM_SHELL_PROFILES) return;
+    trustQueryGenerationRef.current += 1;
+    setTrustStoreLoading(false);
+    const profile: CustomShellProfile = {
+      id: `custom:${crypto.randomUUID()}`,
+      label: "Custom shell",
+      executable: "",
+    };
+    setDraft((current) => ({
+      ...current,
+      defaultShellProfileId: profile.id,
+      customShellProfiles: [...current.customShellProfiles, profile],
+    }));
+    setTrustedExecutables((current) => ({ ...current, [profile.id]: false }));
+    setTrustStatus("Add an absolute .exe path, then explicitly trust it before saving.");
+  };
+
+  const updateCustomShellProfile = (
+    profileId: string,
+    key: "label" | "executable",
+    value: string,
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      customShellProfiles: current.customShellProfiles.map((profile) =>
+        profile.id === profileId ? { ...profile, [key]: value } : profile,
+      ),
+    }));
+    if (key === "executable") {
+      trustQueryGenerationRef.current += 1;
+      setTrustStoreLoading(false);
+      setTrustedExecutables((current) => ({ ...current, [profileId]: false }));
+      setTrustStatus("Executable path changed. Trust must be granted again.");
+    }
+  };
+
+  const removeCustomShellProfile = async (profileId: string) => {
+    const currentDraft = draftRef.current;
+    const profile = currentDraft.customShellProfiles.find((candidate) => candidate.id === profileId);
+    if (!profile) return;
+    const executable = normalizeCustomShellExecutable(profile.executable);
+    const otherReferences = countCustomShellProfilesUsingExecutable(
+      currentDraft,
+      executable,
+      profileId,
+    );
+    let trustRevoked = false;
+
+    if (executable && otherReferences === 0 && trustStore.healthy) {
+      const confirmed = window.confirm(
+        `Remove ${profile.label || "this profile"} and revoke any trust record for ${executable}? Existing terminal processes will keep running.`,
+      );
+      if (!confirmed) return;
+      setTrustPendingId(profileId);
+      try {
+        trustRevoked = await invoke<boolean>("revoke_shell_executable", { executable });
+      } catch (cause) {
+        setTrustStatus(`Unable to revoke ${executable}: ${String(cause)}`);
+        setTrustPendingId(null);
+        return;
+      }
+    }
+
+    const remainingProfiles = currentDraft.customShellProfiles.filter(
+      (candidate) => candidate.id !== profileId,
+    );
+    const nextDraft = {
+      ...currentDraft,
+      defaultShellProfileId:
+        currentDraft.defaultShellProfileId === profileId
+          ? DEFAULT_SETTINGS.defaultShellProfileId
+          : currentDraft.defaultShellProfileId,
+      customShellProfiles: remainingProfiles,
+    };
+    setDraft(nextDraft);
+    draftRef.current = nextDraft;
+    setTrustPendingId(null);
+    const message =
+      otherReferences > 0
+        ? "Profile removed. Trust was retained because another profile uses the same executable."
+        : trustRevoked
+          ? "Profile removed and its final executable trust was revoked."
+          : !trustStore.healthy
+            ? "Profile removed. Reset the unreadable trust store separately before trusting another executable."
+            : "Profile removed. No persisted trust record needed revocation.";
+    await refreshTrustState(remainingProfiles, message);
+  };
+
+  const trustCustomShellProfile = async (profile: CustomShellProfile) => {
+    const executableError = validateCustomShellExecutable(profile.executable);
+    if (executableError) {
+      setTrustStatus(`${profile.label || "Custom shell"}: ${executableError}`);
+      return;
+    }
+
+    const executable = normalizeCustomShellExecutable(profile.executable);
+    const trustQueryGeneration = ++trustQueryGenerationRef.current;
+    setTrustPendingId(profile.id);
+    setTrustStatus(`Trusting ${profile.label || "custom shell"}…`);
+    try {
+      const trusted = await invoke<boolean>("trust_shell_executable", { executable });
+      if (!trusted) throw new Error("TonyMux did not persist the trust decision.");
+      const currentProfile = draftRef.current.customShellProfiles.find(
+        (candidate) => candidate.id === profile.id,
+      );
+      if (
+        trustQueryGeneration !== trustQueryGenerationRef.current ||
+        normalizeCustomShellExecutable(currentProfile?.executable) !== executable
+      ) {
+        setTrustStatus(
+          `${profile.label || "Custom shell"} changed while trust was being saved. Review and trust the current path again.`,
+        );
+        return;
+      }
+      const currentDraft = draftRef.current;
+      const nextProfiles = currentDraft.customShellProfiles.map((candidate) =>
+        candidate.id === profile.id ? { ...candidate, executable } : candidate,
+      );
+      const nextDraft = { ...currentDraft, customShellProfiles: nextProfiles };
+      setDraft(nextDraft);
+      draftRef.current = nextDraft;
+      await refreshTrustState(
+        nextProfiles,
+        `${profile.label || "Custom shell"} is trusted by SHA-256 identity on this Windows account.`,
+      );
+    } catch (cause) {
+      setTrustedExecutables((current) => ({ ...current, [profile.id]: false }));
+      setTrustStatus(`Unable to trust ${profile.label || "custom shell"}: ${String(cause)}`);
+    } finally {
+      setTrustPendingId(null);
+    }
+  };
+
+  const revokeTrustedExecutable = async (entry: TrustedExecutableSnapshot) => {
+    if (!window.confirm(`Revoke trust for ${entry.executable}? New terminal panes cannot launch it until trusted again.`)) {
+      return;
+    }
+    setTrustStorePendingPath(entry.executable);
+    setTrustStatus(`Revoking ${entry.executable}…`);
+    try {
+      await invoke<boolean>("revoke_shell_executable", { executable: entry.executable });
+      await refreshTrustState(
+        draftRef.current.customShellProfiles,
+        `Trust revoked for ${entry.executable}.`,
+      );
+    } catch (cause) {
+      setTrustStatus(`Unable to revoke ${entry.executable}: ${String(cause)}`);
+    } finally {
+      setTrustStorePendingPath(null);
+    }
+  };
+
+  const clearTrustedExecutables = async () => {
+    const message = trustStore.healthy
+      ? "Clear every trusted custom executable? All custom profiles must be trusted again before launch."
+      : "Reset the unreadable trust store? Existing trust decisions will be discarded.";
+    if (!window.confirm(message)) return;
+    setTrustStorePendingPath("*");
+    setTrustStatus(trustStore.healthy ? "Clearing trusted executables…" : "Resetting trust store…");
+    try {
+      const removed = await invoke<number>("clear_trusted_shell_executables");
+      await refreshTrustState(
+        draftRef.current.customShellProfiles,
+        trustStore.healthy
+          ? `Cleared ${removed} trusted executable${removed === 1 ? "" : "s"}.`
+          : "Trust store reset. Custom executables must be trusted again.",
+      );
+    } catch (cause) {
+      setTrustStatus(`Unable to reset trusted executables: ${String(cause)}`);
+    } finally {
+      setTrustStorePendingPath(null);
+    }
+  };
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape" && recordingActionId) {
+      event.preventDefault();
+      setRecordingActionId(null);
+      setShortcutError("");
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), select:not([disabled]):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    );
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  const save = async () => {
+    if (saving) return;
+    const nextErrors = validateSettings(draft);
+    setErrors(nextErrors);
+    if (nextErrors.length) return;
+
+    const normalized = normalizeSettings(draft);
+    const selectedCustomProfile = findCustomShellProfile(
+      normalized,
+      normalized.defaultShellProfileId,
+    );
+    if (selectedCustomProfile) {
+      setSaving(true);
+      try {
+        const trusted = await invoke<boolean>("is_shell_executable_trusted", {
+          executable: selectedCustomProfile.executable,
+        });
+        setTrustedExecutables((current) => ({
+          ...current,
+          [selectedCustomProfile.id]: trusted,
+        }));
+        if (!trusted) {
+          setErrors([
+            `${selectedCustomProfile.label} must be explicitly trusted before it can be the default shell.`,
+          ]);
+          setSaving(false);
+          return;
+        }
+      } catch (cause) {
+        setErrors([`Unable to verify custom shell trust: ${String(cause)}`]);
+        setSaving(false);
+        return;
+      }
+    }
+
+    setSaving(false);
+    onSave(normalized);
+    onClose();
+  };
+
+  const reset = () => {
+    setDraft(cloneSettings(DEFAULT_SETTINGS));
+    setErrors([]);
+    setNotice("");
+    setRecordingActionId(null);
+    setShortcutError("");
+    trustQueryGenerationRef.current += 1;
+    setTrustedExecutables({});
+    setTrustStore(EMPTY_TRUST_STORE);
+    setTrustStoreLoading(false);
+    setTrustPendingId(null);
+    setTrustStorePendingPath(null);
+    setTrustStatus("");
+  };
+
+  const resetShortcuts = () => {
+    setDraft((current) => ({
+      ...current,
+      shortcuts: { ...DEFAULT_SHORTCUT_BINDINGS },
+    }));
+    setRecordingActionId(null);
+    setShortcutError("");
+    setNotice("Keyboard shortcuts reset to TonyMux defaults.");
+  };
+
+  const clearShortcut = (actionId: ShortcutActionId) => {
+    setDraft((current) => ({
+      ...current,
+      shortcuts: { ...current.shortcuts, [actionId]: null },
+    }));
+    setRecordingActionId(null);
+    setShortcutError("");
+  };
+
+  const recordShortcut = (
+    actionId: ShortcutActionId,
+    event: KeyboardEvent<HTMLButtonElement>,
+  ) => {
+    if (event.key === "Tab") return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === "Escape") {
+      setRecordingActionId(null);
+      setShortcutError("");
+      return;
+    }
+
+    if (
+      (event.key === "Backspace" || event.key === "Delete") &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
+      clearShortcut(actionId);
+      return;
+    }
+
+    const binding = shortcutFromKeyboardEvent(event);
+    if (!binding) {
+      setShortcutError(
+        "Use Ctrl or Alt with a non-modifier key. Escape cancels; Backspace clears.",
+      );
+      return;
+    }
+
+    const conflictActionId = findShortcutConflict(draft.shortcuts, actionId, binding);
+    if (conflictActionId) {
+      setShortcutError(
+        `${formatShortcutBinding(binding)} is already assigned to ${getShortcutAction(conflictActionId).label}.`,
+      );
+      return;
+    }
+
+    setDraft((current) => ({
+      ...current,
+      shortcuts: { ...current.shortcuts, [actionId]: binding },
+    }));
+    setRecordingActionId(null);
+    setShortcutError("");
+  };
+
+  const clearSavedWorkspaceState = () => {
+    if (!window.confirm("Clear saved TonyMux workspace state? Current panes will remain open.")) {
+      return;
+    }
+    onClearWorkspaceState();
+    setNotice("Saved workspace state cleared. Current panes remain open until you close TonyMux.");
+    setErrors([]);
+  };
+
+  const exportFile = () => {
+    const blob = new Blob([exportSettings(draft)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "tonymux-settings.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const imported = importSettings(await file.text());
+      const trustQueryGeneration = ++trustQueryGenerationRef.current;
+      setDraft(imported);
+      draftRef.current = imported;
+      setTrustStoreLoading(true);
+      const trustState = await queryTrustState(imported.customShellProfiles);
+      if (trustQueryGeneration === trustQueryGenerationRef.current) {
+        setTrustedExecutables(trustState.profiles);
+        setTrustStore(trustState.store);
+        setTrustStoreLoading(false);
+      }
+      setErrors([]);
+      setRecordingActionId(null);
+      setShortcutError("");
+      setTrustStatus(
+        imported.customShellProfiles.length
+          ? "Imported executable paths remain untrusted unless this Windows account already trusts the same file identity."
+          : "",
+      );
+    } catch (cause) {
+      setErrors([`Unable to import settings: ${String(cause)}`]);
+    }
+  };
+
+  return (
+    <div className="settings-scrim" role="presentation" onMouseDown={onClose}>
+      <div
+        ref={dialogRef}
+        className="settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        onMouseDown={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
+        onKeyDown={handleDialogKeyDown}
+      >
+        <header className="settings-dialog__header">
+          <div className="settings-dialog__heading">
+            <span className="settings-dialog__icon" aria-hidden="true">
+              <Settings2 size={18} />
+            </span>
+            <div>
+              <h2 id={titleId}>TonyMux settings</h2>
+              <p id={descriptionId}>
+                New terminal panes use these values. Existing sessions keep running unchanged.
+              </p>
+            </div>
+          </div>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Close settings"
+            title="Close settings (Esc)"
+            onClick={onClose}
+          >
+            <X size={16} />
+          </button>
+        </header>
+
+        <div className="settings-dialog__body">
+          {notice && (
+            <div className="settings-notice" role="status">
+              {notice}
+            </div>
+          )}
+
+          {errors.length > 0 && (
+            <div
+              ref={errorSummaryRef}
+              className="settings-errors"
+              role="alert"
+              tabIndex={-1}
+              aria-label="Settings errors"
+            >
+              <strong>Review the following settings</strong>
+              {errors.map((error) => (
+                <p key={error}>{error}</p>
+              ))}
+            </div>
+          )}
+
+          <section className="settings-section" aria-labelledby="settings-shell-title">
+            <div className="settings-section__heading">
+              <TerminalSquare size={15} aria-hidden="true" />
+              <div>
+                <h3 id="settings-shell-title">Shell profile</h3>
+                <p>Choose the allowlisted executable used by newly created terminals.</p>
+              </div>
+            </div>
+
+            <div className="profile-grid" role="radiogroup" aria-label="Default shell profile">
+              {SHELL_PROFILES.map((profile) => {
+                const selected = draft.defaultShellProfileId === profile.id;
+                return (
+                  <button
+                    key={profile.id}
+                    className={`profile-card${selected ? " profile-card--selected" : ""}`}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        defaultShellProfileId: profile.id,
+                      }))
+                    }
+                  >
+                    <strong>{profile.label}</strong>
+                    <span>{profile.description}</span>
+                    <code>{profile.executable}</code>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="custom-profile-panel">
+              <div className="custom-profile-panel__heading">
+                <div>
+                  <strong>Custom executables</strong>
+                  <small>
+                    TonyMux launches only absolute local .exe paths explicitly trusted on this Windows account.
+                  </small>
+                </div>
+                <button
+                  className="settings-button settings-button--quiet settings-button--compact"
+                  type="button"
+                  disabled={
+                    draft.customShellProfiles.length >= MAX_CUSTOM_SHELL_PROFILES ||
+                    trustPendingId !== null ||
+                    trustStorePendingPath !== null
+                  }
+                  onClick={addCustomShellProfile}
+                >
+                  <Plus size={13} aria-hidden="true" />
+                  Add profile
+                </button>
+              </div>
+
+              {draft.customShellProfiles.length === 0 ? (
+                <div className="custom-profile-empty">
+                  <ShieldCheck size={16} aria-hidden="true" />
+                  <span>No custom executable has been configured.</span>
+                </div>
+              ) : (
+                <div className="custom-profile-list">
+                  {draft.customShellProfiles.map((profile) => {
+                    const selected = draft.defaultShellProfileId === profile.id;
+                    const executableError = validateCustomShellExecutable(profile.executable);
+                    const trusted = trustedExecutables[profile.id] === true;
+                    const normalizedExecutable = normalizeCustomShellExecutable(profile.executable);
+                    const trustedEntry = trustStore.entries.find(
+                      (entry) =>
+                        normalizeCustomShellExecutable(entry.executable).toLocaleLowerCase("en-US") ===
+                        normalizedExecutable.toLocaleLowerCase("en-US"),
+                    );
+                    const identityStatus = trusted ? "trusted" : trustedEntry?.status ?? "untrusted";
+                    const identityLabel =
+                      identityStatus === "trusted"
+                        ? "Trusted identity matches"
+                        : identityStatus === "changed"
+                          ? "File changed — trust again"
+                          : identityStatus === "missing"
+                            ? "Trusted file is missing"
+                            : identityStatus === "unavailable"
+                              ? "Identity check unavailable"
+                              : "Not trusted";
+                    const pending = trustPendingId === profile.id;
+                    const fieldId = profile.id.replace(/[^A-Za-z0-9_-]/g, "-");
+                    return (
+                      <fieldset
+                        className={`custom-profile${selected ? " custom-profile--selected" : ""}`}
+                        key={profile.id}
+                      >
+                        <legend className="sr-only">{profile.label || "Custom shell"}</legend>
+                        <div className="custom-profile__toolbar">
+                          <label className="custom-profile__selector">
+                            <input
+                              type="radio"
+                              name="default-shell-profile"
+                              checked={selected}
+                              onChange={() =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  defaultShellProfileId: profile.id,
+                                }))
+                              }
+                            />
+                            <span>Use as default shell</span>
+                          </label>
+                          <button
+                            className="settings-button settings-button--danger settings-button--compact"
+                            type="button"
+                            aria-label={`Remove ${profile.label || "custom shell"}`}
+                            disabled={trustPendingId !== null || trustStorePendingPath !== null}
+                            onClick={() => void removeCustomShellProfile(profile.id)}
+                          >
+                            <Trash2 size={13} aria-hidden="true" />
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="settings-form-grid">
+                          <label className="settings-field" htmlFor={`${fieldId}-label`}>
+                            <span>Profile name</span>
+                            <input
+                              id={`${fieldId}-label`}
+                              value={profile.label}
+                              maxLength={64}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateCustomShellProfile(profile.id, "label", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="settings-field" htmlFor={`${fieldId}-executable`}>
+                            <span>Executable path</span>
+                            <input
+                              id={`${fieldId}-executable`}
+                              value={profile.executable}
+                              placeholder="C:\\Tools\\shell.exe"
+                              spellCheck={false}
+                              aria-invalid={Boolean(executableError)}
+                              aria-describedby={`${fieldId}-executable-help`}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateCustomShellProfile(
+                                  profile.id,
+                                  "executable",
+                                  event.target.value,
+                                )
+                              }
+                            />
+                            <small
+                              id={`${fieldId}-executable-help`}
+                              className={executableError ? "settings-field__error" : undefined}
+                            >
+                              {executableError ?? "Arguments and environment-variable expansion are not allowed."}
+                            </small>
+                          </label>
+                        </div>
+
+                        <div className="custom-profile__trust">
+                          <span
+                            className={`custom-profile__identity custom-profile__identity--${identityStatus}`}
+                            title={trustedEntry?.detail ?? undefined}
+                          >
+                            {identityStatus === "trusted" ? (
+                              <CheckCircle2 size={14} aria-hidden="true" />
+                            ) : identityStatus === "missing" ? (
+                              <ShieldX size={14} aria-hidden="true" />
+                            ) : identityStatus === "changed" || identityStatus === "unavailable" ? (
+                              <AlertTriangle size={14} aria-hidden="true" />
+                            ) : (
+                              <ShieldCheck size={14} aria-hidden="true" />
+                            )}
+                            {identityLabel}
+                          </span>
+                          <button
+                            className="settings-button settings-button--quiet settings-button--compact"
+                            type="button"
+                            disabled={
+                              Boolean(executableError) ||
+                              !trustStore.healthy ||
+                              trustPendingId !== null ||
+                              trustStorePendingPath !== null
+                            }
+                            title={!trustStore.healthy ? "Reset the trust store before adding trust." : undefined}
+                            onClick={() => void trustCustomShellProfile(profile)}
+                          >
+                            <ShieldCheck size={13} aria-hidden="true" />
+                            {pending ? "Trusting…" : trusted ? "Trust again" : "Trust executable"}
+                          </button>
+                        </div>
+                      </fieldset>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="trusted-shell-store" aria-describedby={trustStoreStatusId}>
+                <div className="trusted-shell-store__heading">
+                  <div>
+                    <strong>Trusted executable identities</strong>
+                    <small>
+                      Trust is bound to the canonical path, SHA-256 fingerprint and file size. Updates require trust again.
+                    </small>
+                  </div>
+                  <button
+                    className="settings-button settings-button--quiet settings-button--compact"
+                    type="button"
+                    disabled={
+                      trustStoreLoading ||
+                      trustPendingId !== null ||
+                      trustStorePendingPath !== null
+                    }
+                    onClick={() =>
+                      void refreshTrustState(
+                        draftRef.current.customShellProfiles,
+                        "Trust status refreshed.",
+                      )
+                    }
+                  >
+                    <RefreshCw size={13} aria-hidden="true" />
+                    {trustStoreLoading ? "Checking…" : "Refresh"}
+                  </button>
+                </div>
+
+                {!trustStore.healthy ? (
+                  <div className="trusted-shell-store__error" role="alert">
+                    <AlertTriangle size={16} aria-hidden="true" />
+                    <div>
+                      <strong>Trust store needs recovery</strong>
+                      <p>{trustStore.error ?? "TonyMux could not read the trust store."}</p>
+                    </div>
+                    <button
+                      className="settings-button settings-button--danger settings-button--compact"
+                      type="button"
+                      disabled={trustPendingId !== null || trustStorePendingPath !== null}
+                      onClick={() => void clearTrustedExecutables()}
+                    >
+                      <RotateCcw size={13} aria-hidden="true" />
+                      {trustStorePendingPath === "*" ? "Resetting…" : "Reset trust store"}
+                    </button>
+                  </div>
+                ) : trustStoreLoading && trustStore.entries.length === 0 ? (
+                  <div className="trusted-shell-store__empty" role="status">
+                    <RefreshCw size={15} aria-hidden="true" />
+                    <span>Checking trusted executable identities…</span>
+                  </div>
+                ) : trustStore.entries.length === 0 ? (
+                  <div className="trusted-shell-store__empty">
+                    <ShieldCheck size={15} aria-hidden="true" />
+                    <span>No executable identity is trusted on this Windows account.</span>
+                  </div>
+                ) : (
+                  <>
+                    <ul className="trusted-shell-store__list" aria-label="Trusted executable identities">
+                      {trustStore.entries.map((entry) => {
+                        const pending = trustStorePendingPath === entry.executable;
+                        const statusLabel =
+                          entry.status === "trusted"
+                            ? "Identity matches"
+                            : entry.status === "changed"
+                              ? "File changed"
+                              : entry.status === "missing"
+                                ? "File missing"
+                                : "Unavailable";
+                        return (
+                          <li className="trusted-shell-entry" key={entry.executable}>
+                            <div className={`trusted-shell-entry__status trusted-shell-entry__status--${entry.status}`}>
+                              {entry.status === "trusted" ? (
+                                <CheckCircle2 size={15} aria-hidden="true" />
+                              ) : entry.status === "missing" ? (
+                                <ShieldX size={15} aria-hidden="true" />
+                              ) : (
+                                <AlertTriangle size={15} aria-hidden="true" />
+                              )}
+                              <span>{statusLabel}</span>
+                            </div>
+                            <div className="trusted-shell-entry__copy">
+                              <code title={entry.executable}>{entry.executable}</code>
+                              <small>
+                                SHA-256 {entry.sha256.slice(0, 16)}… · {formatFileSize(entry.sizeBytes)}
+                              </small>
+                              {entry.detail && <p>{entry.detail}</p>}
+                            </div>
+                            <button
+                              className="settings-button settings-button--danger settings-button--compact"
+                              type="button"
+                              disabled={trustPendingId !== null || trustStorePendingPath !== null}
+                              onClick={() => void revokeTrustedExecutable(entry)}
+                            >
+                              <ShieldX size={13} aria-hidden="true" />
+                              {pending ? "Revoking…" : "Revoke"}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="trusted-shell-store__footer">
+                      <span>{trustStore.entries.length} of 32 trust records used.</span>
+                      <button
+                        className="settings-button settings-button--danger settings-button--compact"
+                        type="button"
+                        disabled={trustPendingId !== null || trustStorePendingPath !== null}
+                        onClick={() => void clearTrustedExecutables()}
+                      >
+                        <Trash2 size={13} aria-hidden="true" />
+                        {trustStorePendingPath === "*" ? "Clearing…" : "Clear all trust"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div
+                id={trustStoreStatusId}
+                className="custom-profile-status"
+                role="status"
+                aria-live="polite"
+              >
+                {trustStatus}
+              </div>
+            </div>
+
+            <div className="settings-form-grid">
+              <label className="settings-field settings-field--wide">
+                <span>Default working directory</span>
+                <input
+                  value={draft.defaultWorkingDirectory}
+                  placeholder="Leave empty to inherit the workspace directory"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDraft((current) => ({
+                      ...current,
+                      defaultWorkingDirectory: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="settings-field settings-field--wide">
+                <span>Startup command</span>
+                <input
+                  value={draft.startupCommand}
+                  placeholder="Optional command sent after the shell starts"
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDraft((current) => ({
+                      ...current,
+                      startupCommand: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+          </section>
+
+          <section className="settings-section" aria-labelledby="settings-terminal-title">
+            <div className="settings-section__heading">
+              <TerminalSquare size={15} aria-hidden="true" />
+              <div>
+                <h3 id="settings-terminal-title">Terminal appearance</h3>
+                <p>Dense defaults tuned for long-running developer workspaces.</p>
+              </div>
+            </div>
+
+            <div className="settings-form-grid">
+              <label className="settings-field settings-field--wide">
+                <span>Font family</span>
+                <input
+                  value={draft.terminal.fontFamily}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("fontFamily", event.target.value)}
+                />
+              </label>
+              <label className="settings-field">
+                <span>Font size</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={24}
+                  step={1}
+                  value={draft.terminal.fontSize}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("fontSize", Number(event.target.value))}
+                />
+              </label>
+              <label className="settings-field">
+                <span>Line height</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={2}
+                  step={0.05}
+                  value={draft.terminal.lineHeight}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("lineHeight", Number(event.target.value))}
+                />
+              </label>
+              <label className="settings-field">
+                <span>Cursor</span>
+                <select
+                  value={draft.terminal.cursorStyle}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                    updateTerminal("cursorStyle", event.target.value as CursorStyle)
+                  }
+                >
+                  <option value="bar">Bar</option>
+                  <option value="block">Block</option>
+                  <option value="underline">Underline</option>
+                </select>
+              </label>
+              <label className="settings-field">
+                <span>Scrollback lines</span>
+                <input
+                  type="number"
+                  min={1_000}
+                  max={100_000}
+                  step={1_000}
+                  value={draft.terminal.scrollback}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("scrollback", Number(event.target.value))}
+                />
+              </label>
+              <label className="settings-toggle settings-field--wide">
+                <input
+                  type="checkbox"
+                  checked={draft.terminal.cursorBlink}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("cursorBlink", event.target.checked)}
+                />
+                <span>
+                  <strong>Blinking cursor</strong>
+                  <small>Disable it for reduced visual motion.</small>
+                </span>
+              </label>
+            </div>
+          </section>
+
+          <section className="settings-section" aria-labelledby="settings-shortcuts-title">
+            <div className="settings-section__heading settings-section__heading--actions">
+              <div className="settings-section__heading-main">
+                <Keyboard size={15} aria-hidden="true" />
+                <div>
+                  <h3 id="settings-shortcuts-title">Keyboard shortcuts</h3>
+                  <p id={shortcutsHelpId}>
+                    Select a binding, then press Ctrl or Alt with another key. Physical key positions keep bindings stable across keyboard layouts.
+                  </p>
+                </div>
+              </div>
+              <button
+                className="settings-button settings-button--quiet settings-button--compact"
+                type="button"
+                onClick={resetShortcuts}
+              >
+                <RotateCcw size={13} aria-hidden="true" />
+                Reset shortcuts
+              </button>
+            </div>
+
+            <div
+              className="shortcut-list"
+              role="list"
+              aria-describedby={`${shortcutsHelpId} ${shortcutsStatusId}`}
+            >
+              {SHORTCUT_ACTIONS.map((action) => {
+                const binding = draft.shortcuts[action.id];
+                const recording = recordingActionId === action.id;
+                return (
+                  <div className="shortcut-row" role="listitem" key={action.id}>
+                    <div className="shortcut-row__copy">
+                      <span className="shortcut-row__section">{action.section}</span>
+                      <strong>{action.label}</strong>
+                      <small>{action.description}</small>
+                    </div>
+                    <div className="shortcut-row__actions">
+                      <button
+                        className={`shortcut-recorder${recording ? " shortcut-recorder--recording" : ""}`}
+                        type="button"
+                        aria-pressed={recording}
+                        aria-label={`${action.label}: ${recording ? "press a shortcut" : formatShortcutBinding(binding)}`}
+                        onClick={() => {
+                          setRecordingActionId(recording ? null : action.id);
+                          setShortcutError("");
+                        }}
+                        onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
+                          if (recording) recordShortcut(action.id, event);
+                        }}
+                        onBlur={() => {
+                          if (recording) setRecordingActionId(null);
+                        }}
+                      >
+                        {recording ? "Press shortcut…" : formatShortcutBinding(binding)}
+                      </button>
+                      <button
+                        className="shortcut-clear"
+                        type="button"
+                        disabled={!binding}
+                        aria-label={`Clear shortcut for ${action.label}`}
+                        title="Clear shortcut"
+                        onClick={() => clearShortcut(action.id)}
+                      >
+                        <X size={13} aria-hidden="true" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div
+              id={shortcutsStatusId}
+              className={`shortcut-status${shortcutError ? " shortcut-status--error" : ""}`}
+              role={shortcutError ? "alert" : "status"}
+              aria-live="polite"
+            >
+              {shortcutError ||
+                (recordingActionId
+                  ? `Recording ${getShortcutAction(recordingActionId).label}. Escape cancels; Backspace clears.`
+                  : "Unassigned actions remain available from visible controls and the command palette.")}
+            </div>
+          </section>
+
+          <section className="settings-section" aria-labelledby="settings-persistence-title">
+            <div className="settings-section__heading">
+              <Database size={15} aria-hidden="true" />
+              <div>
+                <h3 id="settings-persistence-title">Workspace restore</h3>
+                <p>Restore saved layout metadata while always starting fresh terminal processes.</p>
+              </div>
+            </div>
+
+            <div className="settings-form-grid">
+              <label className="settings-toggle settings-field--wide">
+                <input
+                  type="checkbox"
+                  checked={draft.persistence.restoreWorkspaces}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDraft((current) => ({
+                      ...current,
+                      persistence: {
+                        ...current.persistence,
+                        restoreWorkspaces: event.target.checked,
+                      },
+                    }))
+                  }
+                />
+                <span>
+                  <strong>Restore workspaces on launch</strong>
+                  <small>Stores bounded layout metadata and, when enabled below, inert terminal history.</small>
+                </span>
+              </label>
+              <label className="settings-field settings-field--wide">
+                <span>Restored terminal history lines</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={MAX_TERMINAL_HISTORY_LINES}
+                  step={100}
+                  value={draft.persistence.terminalHistoryLines}
+                  disabled={!draft.persistence.restoreWorkspaces}
+                  aria-describedby={historyHelpId}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                    setDraft((current) => ({
+                      ...current,
+                      persistence: {
+                        ...current.persistence,
+                        terminalHistoryLines: Number(event.target.value),
+                      },
+                    }))
+                  }
+                />
+                <small id={historyHelpId}>
+                  Use 0 to disable history. TonyMux stores at most 5,000 lines, 512 KiB per pane and 4 MiB total.
+                </small>
+              </label>
+              <div className="settings-persistence-action settings-field--wide">
+                <div>
+                  <strong>Saved workspace state</strong>
+                  <small>Clearing it does not remove TonyMux settings or close current panes.</small>
+                </div>
+                <button
+                  className="settings-button settings-button--danger"
+                  type="button"
+                  onClick={clearSavedWorkspaceState}
+                >
+                  <Trash2 size={14} />
+                  Clear saved state
+                </button>
+              </div>
+            </div>
+          </section>
+
+        </div>
+
+        <footer className="settings-dialog__footer">
+          <div className="settings-dialog__utility-actions">
+            <button className="settings-button settings-button--quiet" type="button" onClick={reset}>
+              <RotateCcw size={14} />
+              Reset
+            </button>
+            <button
+              className="settings-button settings-button--quiet"
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+            >
+              <Upload size={14} />
+              Import
+            </button>
+            <button
+              className="settings-button settings-button--quiet"
+              type="button"
+              onClick={exportFile}
+            >
+              <Download size={14} />
+              Export
+            </button>
+            <input
+              ref={importInputRef}
+              className="sr-only"
+              type="file"
+              tabIndex={-1}
+              accept="application/json,.json"
+              onChange={importFile}
+            />
+          </div>
+          <div className="settings-dialog__primary-actions">
+            <button className="settings-button settings-button--quiet" type="button" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className="settings-button settings-button--primary"
+              type="button"
+              disabled={saving}
+              aria-busy={saving}
+              onClick={() => void save()}
+            >
+              {saving ? "Saving…" : "Save settings"}
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}

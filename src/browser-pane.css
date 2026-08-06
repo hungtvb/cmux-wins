@@ -1,0 +1,204 @@
+.browser-pane {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 240px;
+  grid-template-rows: 32px 41px auto minmax(0, 1fr);
+  background: var(--tm-canvas);
+  isolation: isolate;
+}
+
+.browser-pane__navigation {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--tm-border-subtle);
+  background: var(--tm-surface-0);
+}
+
+.browser-pane__navigation .icon-button {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.browser-pane__navigation .icon-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.browser-pane__navigation .icon-button:disabled:hover {
+  border-color: transparent;
+  background: transparent;
+  color: var(--tm-text-muted);
+}
+
+.browser-pane__navigation input {
+  min-width: 0;
+  height: 30px;
+  flex: 1;
+  padding: 0 10px;
+  border: 1px solid var(--tm-border-default);
+  border-radius: 6px;
+  outline: none;
+  background: var(--tm-surface-1);
+  color: var(--tm-text);
+  font-family: var(--tm-font-mono);
+  font-size: 10px;
+  transition:
+    border-color var(--tm-motion-fast) var(--tm-ease),
+    box-shadow var(--tm-motion-fast) var(--tm-ease),
+    background var(--tm-motion-fast) var(--tm-ease);
+}
+
+.browser-pane__navigation input:hover {
+  border-color: var(--tm-border-strong);
+  background: var(--tm-hover);
+}
+
+.browser-pane__navigation input:focus {
+  border-color: var(--tm-focus);
+  background: var(--tm-surface-2);
+  box-shadow: 0 0 0 2px var(--tm-focus-soft);
+}
+
+.browser-pane__loading {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--tm-info);
+}
+
+.browser-pane__loading > svg {
+  animation: browser-pane-spin 800ms linear infinite;
+}
+
+.browser-pane__feedback {
+  display: grid;
+  min-width: 0;
+  min-height: 32px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 7px 5px 10px;
+  border-bottom: 1px solid var(--tm-border-default);
+  background: var(--tm-surface-1);
+  color: var(--tm-text);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.browser-pane__feedback > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-pane__feedback--notice {
+  border-bottom-color: var(--tm-warning-border);
+  background: var(--tm-warning-soft);
+  color: var(--tm-warning);
+}
+
+.browser-pane__feedback--error {
+  border-bottom-color: var(--tm-danger-border);
+  background: var(--tm-danger-soft);
+  color: var(--tm-danger-strong);
+}
+
+.browser-pane__feedback--notice > svg,
+.browser-pane__feedback--error > svg {
+  color: currentColor;
+}
+
+.browser-pane__feedback button {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--tm-border-default);
+  border-radius: 6px;
+  background: var(--tm-surface-2);
+  color: var(--tm-text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.browser-pane__feedback button:hover {
+  border-color: var(--tm-border-strong);
+  background: var(--tm-hover);
+  color: var(--tm-text-strong);
+}
+
+.browser-pane__feedback button:focus-visible {
+  outline: 2px solid var(--tm-focus-ring);
+  outline-offset: 1px;
+}
+
+.browser-pane__feedback .browser-pane__feedback-dismiss {
+  width: 26px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: currentColor;
+  opacity: 0.72;
+}
+
+.browser-pane__feedback .browser-pane__feedback-dismiss:hover {
+  border-color: var(--tm-border-default);
+  background: var(--tm-hover);
+  opacity: 1;
+}
+
+.browser-pane__host {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--tm-canvas);
+}
+
+.browser-pane__status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--tm-text-muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+@keyframes browser-pane-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .browser-pane__loading > svg {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .browser-pane__navigation input,
+  .browser-pane__feedback,
+  .browser-pane__feedback button {
+    border-color: CanvasText;
+  }
+
+  .browser-pane__navigation input:focus,
+  .browser-pane__feedback button:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
+}

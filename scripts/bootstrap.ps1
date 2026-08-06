@@ -16,7 +16,7 @@ function Assert-Command {
 }
 
 if ($env:OS -ne "Windows_NT") {
-    throw "cmux Windows must be bootstrapped from Windows 11."
+    throw "TonyMux must be bootstrapped from Windows 11."
 }
 
 Assert-Command -Name "node"
@@ -35,9 +35,9 @@ if (-not $SkipInstall) {
 }
 
 if ($Build) {
-    Write-Host "Building MSI and NSIS installers..."
+    Write-Host "Building TonyMux MSI and NSIS installers..."
     npm run tauri build
 } else {
-    Write-Host "Starting cmux Windows in development mode..."
+    Write-Host "Starting TonyMux in development mode..."
     npm run tauri dev
 }

@@ -2,14 +2,65 @@ name: Windows CI
 
 on:
   push:
-    branches: [main, feat/windows-mvp]
-  pull_request:
     branches: [main]
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - ".hermes/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
+  windows-cross-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable with Windows target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install LLVM resource compiler
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes llvm
+          llvm_rc="$(find /usr/lib/llvm-* -type f -name llvm-rc 2>/dev/null | sort -V | tail -n 1)"
+          if [[ -z "$llvm_rc" ]]; then
+            echo "llvm-rc was not found after installing LLVM" >&2
+            exit 1
+          fi
+          sudo ln -sf "$llvm_rc" /usr/local/bin/llvm-rc
+          command -v llvm-rc
+          test -x /usr/local/bin/llvm-rc
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: windows-msvc-cross-check
+
+      - name: Cross-check Windows Rust targets
+        shell: bash
+        run: |
+          cargo check \
+            --manifest-path src-tauri/Cargo.toml \
+            --target x86_64-pc-windows-msvc \
+            --all-targets
+
   check:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -34,18 +85,27 @@ jobs:
       - name: Type-check and build frontend
         run: npm run build
 
-      - name: Check Rust backend
+      - name: Smoke-test Windows QA evidence collector
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\scripts\collect-windows-qa-evidence.ps1 `
+            -SkipBuild `
+            -SkipAutomationSmoke `
+            -NoArchive `
+            -OutputRoot "$env:RUNNER_TEMP\tonymux-qa-evidence-smoke"
+
+      - name: Check Rust backend and binaries
         id: cargo-check
         continue-on-error: true
         shell: pwsh
         run: |
-          cmd /c "cargo check --manifest-path src-tauri/Cargo.toml > cargo-check.log 2>&1"
+          cmd /c "cargo check --manifest-path src-tauri/Cargo.toml --all-targets > cargo-check.log 2>&1"
           $exitCode = $LASTEXITCODE
           Get-Content cargo-check.log
           exit $exitCode
 
       - name: Upload Rust check log
-        if: always()
+        if: always() && steps.cargo-check.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: cargo-check-log
@@ -55,6 +115,44 @@ jobs:
 
       - name: Fail when Rust check failed
         if: steps.cargo-check.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
+
+      - name: Run Rust unit tests
+        id: cargo-unit-test
+        continue-on-error: true
+        timeout-minutes: 12
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\scripts\run-rust-unit-tests.ps1 `
+            -ManifestPath .\src-tauri\Cargo.toml `
+            -LogPath .\cargo-unit-test.log
+
+      - name: Upload Rust unit test log
+        if: always() && steps.cargo-unit-test.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-unit-test-log
+          path: cargo-unit-test.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Diagnose Windows unit-test loader failure
+        if: steps.cargo-unit-test.outcome == 'failure'
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File .\scripts\diagnose-windows-test-loader.ps1
+
+      - name: Upload Windows unit-test loader diagnostics
+        if: steps.cargo-unit-test.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-loader-diagnostics
+          path: test-loader-diagnostics
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail when Rust unit tests failed
+        if: steps.cargo-unit-test.outcome == 'failure'
         shell: pwsh
         run: exit 1
 
@@ -70,7 +168,7 @@ jobs:
           exit $exitCode
 
       - name: Upload ConPTY smoke test log
-        if: always()
+        if: always() && steps.cargo-test.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: conpty-smoke-test-log
@@ -83,10 +181,25 @@ jobs:
         shell: pwsh
         run: exit 1
 
+      - name: Build automation CLIs
+        run: cargo build --manifest-path src-tauri/Cargo.toml --release --bin tonymux-cli --bin cmux-cli
+
+      - name: Upload automation CLIs
+        uses: actions/upload-artifact@v4
+        with:
+          name: tonymux-cli-windows-x64
+          path: |
+            src-tauri/target/release/tonymux-cli.exe
+            src-tauri/target/release/cmux-cli.exe
+          if-no-files-found: error
+          retention-days: 7
+
   installer:
     needs: check
     runs-on: windows-latest
     timeout-minutes: 35
+    env:
+      TONYMUX_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Checkout
@@ -111,12 +224,131 @@ jobs:
       - name: Build MSI and NSIS installers
         run: npm run tauri build
 
+      - name: Download automation CLIs from exact-head check job
+        uses: actions/download-artifact@v4
+        with:
+          name: tonymux-cli-windows-x64
+          path: ${{ runner.temp }}/tonymux-cli
+
+      - name: Package portable Windows build
+        id: portable
+        shell: powershell
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-portable.ps1 `
+            -DesktopExecutable .\src-tauri\target\release\tonymux.exe `
+            -PrimaryCli "${{ runner.temp }}\tonymux-cli\tonymux-cli.exe" `
+            -CompatibilityCli "${{ runner.temp }}\tonymux-cli\cmux-cli.exe" `
+            -OutputDirectory .\artifacts\portable `
+            -Version $version `
+            -Commit $env:TONYMUX_SOURCE_SHA
+
+      - name: Verify portable archive reproducibility and contents
+        shell: powershell
+        run: |
+          $zip = "${{ steps.portable.outputs.portable_zip }}"
+          $firstHash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($firstHash -ne "${{ steps.portable.outputs.portable_zip_sha256 }}") {
+            throw "Portable ZIP output hash does not match the packager result"
+          }
+
+          $repeatOutput = Join-Path $env:RUNNER_TEMP "tonymux-portable-repeat"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-portable.ps1 `
+            -DesktopExecutable .\src-tauri\target\release\tonymux.exe `
+            -PrimaryCli "${{ runner.temp }}\tonymux-cli\tonymux-cli.exe" `
+            -CompatibilityCli "${{ runner.temp }}\tonymux-cli\cmux-cli.exe" `
+            -OutputDirectory $repeatOutput `
+            -Version $version `
+            -Commit $env:TONYMUX_SOURCE_SHA
+
+          $repeatZips = @(Get-ChildItem $repeatOutput\*.zip)
+          if ($repeatZips.Count -ne 1) {
+            throw "Expected one repeated portable ZIP, found $($repeatZips.Count)"
+          }
+          $repeatHash = (Get-FileHash $repeatZips[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($repeatHash -ne $firstHash) {
+            throw "Portable ZIP is not reproducible. first=$firstHash repeat=$repeatHash"
+          }
+
+          $unicodeSuffix = ([string][char]0x6D4B) + ([string][char]0x8BD5)
+          $extractDirectory = Join-Path $env:RUNNER_TEMP "TonyMux portable $unicodeSuffix"
+          if (Test-Path -LiteralPath $extractDirectory) {
+            Remove-Item -LiteralPath $extractDirectory -Recurse -Force
+          }
+          Expand-Archive -LiteralPath $zip -DestinationPath $extractDirectory -Force
+          $requiredFiles = @(
+            "TonyMux.exe",
+            "tonymux-cli.exe",
+            "cmux-cli.exe",
+            "README-PORTABLE.txt",
+            "PORTABLE-METADATA.json",
+            "SHA256SUMS.txt"
+          )
+          foreach ($fileName in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $extractDirectory $fileName) -PathType Leaf)) {
+              throw "Portable ZIP is missing $fileName"
+            }
+          }
+
+          foreach ($line in Get-Content (Join-Path $extractDirectory "SHA256SUMS.txt")) {
+            if ($line -notmatch '^([0-9a-f]{64})  (.+)$') {
+              throw "Invalid SHA256SUMS.txt line: $line"
+            }
+            $expected = $Matches[1]
+            $fileName = $Matches[2]
+            $filePath = Join-Path $extractDirectory $fileName
+            $actual = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) {
+              throw "Portable checksum mismatch for $fileName"
+            }
+          }
+
+          $movedDirectory = Join-Path $env:RUNNER_TEMP "TonyMux moved $unicodeSuffix"
+          if (Test-Path -LiteralPath $movedDirectory) {
+            Remove-Item -LiteralPath $movedDirectory -Recurse -Force
+          }
+          Move-Item -LiteralPath $extractDirectory -Destination $movedDirectory
+          if (-not (Test-Path -LiteralPath (Join-Path $movedDirectory "TonyMux.exe") -PathType Leaf)) {
+            throw "Portable executable was lost after moving the extracted directory"
+          }
+
+      - name: Smoke-launch portable desktop executable
+        timeout-minutes: 2
+        shell: powershell
+        run: |
+          $unicodeSuffix = ([string][char]0x6D4B) + ([string][char]0x8BD5)
+          $executable = Join-Path $env:RUNNER_TEMP "TonyMux moved $unicodeSuffix\TonyMux.exe"
+          $process = Start-Process -FilePath $executable `
+            -WorkingDirectory (Split-Path -Parent $executable) `
+            -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Portable TonyMux exited during launch smoke with code $($process.ExitCode)"
+            }
+          }
+          finally {
+            if (-not $process.HasExited) {
+              cmd /c "taskkill /PID $($process.Id) /T /F" | Out-Null
+            }
+          }
+
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
-          name: cmux-windows-installers
+          name: tonymux-windows-installers
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload portable Windows ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: tonymux-windows-portable-x64
+          path: ${{ steps.portable.outputs.portable_zip }}
           if-no-files-found: error
           retention-days: 7
