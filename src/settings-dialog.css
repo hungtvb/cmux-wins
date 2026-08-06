@@ -1105,3 +1105,76 @@
   outline: 2px solid var(--tm-brand);
   outline-offset: 1px;
 }
+
+/* Create-workspace dialog (in-app replacement for window.prompt) */
+.create-workspace-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--tm-z-settings) - 1);
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 16px;
+}
+
+.create-workspace-dialog__card {
+  width: min(420px, 100%);
+  background: var(--bg-card, var(--bg));
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  padding: 18px 20px 16px;
+  font-size: 13px;
+}
+
+.create-workspace-dialog__header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 16px;
+  color: var(--tm-brand);
+}
+
+.create-workspace-dialog__header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.create-workspace-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.create-workspace-dialog__field span {
+  color: var(--fg-muted);
+}
+
+.create-workspace-dialog__field em {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.create-workspace-dialog__field input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+.create-workspace-dialog__field input:focus-visible {
+  outline: 2px solid var(--tm-brand);
+  outline-offset: 1px;
+}
+
+.create-workspace-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}

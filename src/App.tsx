@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserPane } from "./components/BrowserPane";
 import { CommandPalette } from "./components/CommandPalette";
 import type { CommandPaletteItem } from "./components/commandPaletteModel";
+import { CreateWorkspaceDialog } from "./components/CreateWorkspaceDialog";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { ResizablePaneGrid } from "./components/ResizablePaneGrid";
 import { TerminalPane } from "./components/TerminalPane";
@@ -73,6 +74,7 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
   );
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
   const workspacesRef = useRef(workspaces);
   const metadataByWorkspace = useWorkspaceMetadata(workspaces, activeWorkspaceId);
@@ -175,15 +177,19 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
   }, []);
 
   const addWorkspace = useCallback(() => {
-    const title = window.prompt("Workspace name", `Workspace ${workspaces.length + 1}`)?.trim();
-    if (!title) return;
+    setCreateWorkspaceOpen(true);
+  }, []);
 
-    const cwd = window.prompt("Working directory (optional)", "")?.trim() ?? "";
-    const workspace = createWorkspace(settings, title, cwd);
-    activeWorkspaceIdRef.current = workspace.id;
-    setWorkspaces((current) => [...current, workspace]);
-    setActiveWorkspaceId(workspace.id);
-  }, [settings, workspaces.length]);
+  const commitCreateWorkspace = useCallback(
+    (title: string, cwd: string) => {
+      const workspace = createWorkspace(settings, title, cwd);
+      activeWorkspaceIdRef.current = workspace.id;
+      setWorkspaces((current) => [...current, workspace]);
+      setActiveWorkspaceId(workspace.id);
+      setCreateWorkspaceOpen(false);
+    },
+    [settings],
+  );
 
   const splitTerminalPane = useCallback(() => {
     if (!activeWorkspace) return;
@@ -801,6 +807,12 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
         open={commandPaletteOpen}
         items={commandPaletteItems}
         onClose={() => setCommandPaletteOpen(false)}
+      />
+      <CreateWorkspaceDialog
+        open={createWorkspaceOpen}
+        defaultTitle={`Workspace ${workspaces.length + 1}`}
+        onCreate={commitCreateWorkspace}
+        onClose={() => setCreateWorkspaceOpen(false)}
       />
     </main>
   );
