@@ -34,7 +34,7 @@ export function NotificationPanel({
   }, [onClose]);
 
   return (
-    <div className="notification-panel" role="dialog" aria-label="Notifications">
+    <div className="notification-panel" role="dialog" aria-modal="true" aria-label="Notifications">
       <div className="notification-panel__header">
         <span className="notification-panel__title">
           <Bell size={14} />

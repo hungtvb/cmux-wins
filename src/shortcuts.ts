@@ -63,7 +63,14 @@ function isAllowedCode(code: string): boolean {
 }
 
 function isReservedSystemChord(ctrl: boolean, alt: boolean, code: string): boolean {
-  return (ctrl && alt && code === "Delete") || (alt && !ctrl && code === "F4");
+  // System / hotkey combos that must never be rebindable: Task Manager,
+  // shutdown dialog, and keyboard-layout / input-method toggles. Japanese and
+  // Vietnamese IMEs commonly use Ctrl+Space (IME on/off), Alt+Space (window
+  // menu), and Ctrl+Shift (keyboard layout / language toggle).
+  if (code === "Delete" || code === "F4") return ctrl && alt && code === "Delete" || alt && !ctrl && code === "F4";
+  if (code === "Space") return true;
+  if (code === "ShiftLeft" || code === "ShiftRight") return true;
+  return false;
 }
 
 export function normalizeShortcutBinding(value: unknown, fallback: ShortcutBinding = null): ShortcutBinding {

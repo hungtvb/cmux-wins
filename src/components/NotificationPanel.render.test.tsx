@@ -39,6 +39,7 @@ describe("NotificationPanel", () => {
     const markup = renderPanel();
 
     expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
     expect(markup).toContain('aria-label="Notifications"');
     expect(markup).toContain("Notifications");
     expect(markup.match(/notification-panel__item-main/g)).toHaveLength(2);

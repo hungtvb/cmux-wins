@@ -42,6 +42,13 @@ describe("keyboard shortcuts", () => {
     expect(shortcutFromKeyboardEvent(keyboardEvent({ metaKey: true }))).toBeNull();
   });
 
+  it("reserves IME and system chords (Ctrl+Space, Ctrl+Shift, Alt+Space)", () => {
+    expect(shortcutFromKeyboardEvent(keyboardEvent({ code: "Space" }))).toBeNull();
+    expect(shortcutFromKeyboardEvent(keyboardEvent({ altKey: true, code: "Space" }))).toBeNull();
+    expect(normalizeShortcutBinding("Ctrl+Space", "Ctrl+KeyK")).toBe("Ctrl+KeyK");
+    expect(normalizeShortcutBinding("Ctrl+Shift", "Ctrl+KeyK")).toBe("Ctrl+KeyK");
+  });
+
   it("matches and formats canonical bindings", () => {
     const event = keyboardEvent({ code: "KeyB", shiftKey: true });
     expect(shortcutMatchesEvent("Ctrl+Shift+KeyB", event)).toBe(true);
