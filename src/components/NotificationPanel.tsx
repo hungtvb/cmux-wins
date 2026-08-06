@@ -34,10 +34,15 @@ export function NotificationPanel({
   }, [onClose]);
 
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     // Bring keyboard users into the panel without stealing focus from a pane
     // that was actively being typed into.
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => {
+      requestAnimationFrame(() => returnFocusRef.current?.focus());
+    };
   }, []);
 
   return (

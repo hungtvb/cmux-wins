@@ -74,6 +74,7 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const activeWorkspaceIdRef = useRef(activeWorkspaceId);
+  const workspacesRef = useRef(workspaces);
   const metadataByWorkspace = useWorkspaceMetadata(workspaces, activeWorkspaceId);
 
   useAutomationBridge({
@@ -98,6 +99,10 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    workspacesRef.current = workspaces;
+  }, [workspaces]);
 
   useEffect(() => {
     const persistedWorkspaces = workspaces.map((workspace) => ({
@@ -256,35 +261,39 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
 
   const reconnectPane = useCallback(
     (paneId: string) => {
-      if (!activeWorkspace) return;
-      const pane = activeWorkspace.panes.find((candidate) => candidate.id === paneId);
+      const workspace = workspacesRef.current.find((ws) =>
+        ws.panes.some((candidate) => candidate.id === paneId),
+      );
+      if (!workspace) return;
+      const pane = workspace.panes.find((candidate) => candidate.id === paneId);
       if (!pane || pane.kind !== "terminal") return;
 
-      const isSsh = isSshProfileId(pane.terminalSettings?.shellProfileId ?? "");
+      const terminalPane = pane as TerminalPaneModel;
+      const isSsh = isSshProfileId(terminalPane.terminalSettings?.shellProfileId ?? "");
       const profile = settings.sshProfiles.find(
-        (candidate) => candidate.id === pane.terminalSettings?.shellProfileId,
+        (candidate) => candidate.id === terminalPane.terminalSettings?.shellProfileId,
       );
       if (isSsh && !profile) return;
 
       const replacement = isSsh
         ? createSshTerminalPane(settings, profile!)
-        : createTerminalPane(settings, activeWorkspace.cwd);
+        : createTerminalPane(settings, workspace.cwd);
 
       setWorkspaces((current) =>
-        current.map((workspace) =>
-          workspace.id === activeWorkspace.id
+        current.map((candidateWorkspace) =>
+          candidateWorkspace.id === workspace.id
             ? {
-                ...workspace,
-                panes: workspace.panes.map((candidate) =>
+                ...candidateWorkspace,
+                panes: candidateWorkspace.panes.map((candidate) =>
                   candidate.id === paneId ? { ...replacement, id: paneId } : candidate,
                 ),
               }
-            : workspace,
+            : candidateWorkspace,
         ),
       );
-      setActivePaneByWorkspace((current) => ({ ...current, [activeWorkspace.id]: paneId }));
+      setActivePaneByWorkspace((current) => ({ ...current, [workspace.id]: paneId }));
     },
-    [activeWorkspace, settings],
+    [settings],
   );
 
   const closeWorkspace = useCallback((workspaceId: string) => {

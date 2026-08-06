@@ -42,6 +42,7 @@ const notificationPattern = /\x1b\](?:9|99|777);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 const HISTORY_CAPTURE_INTERVAL_MS = 2_000;
 
 type SshConnectionPayload = {
+  profileId: string;
   host: string;
   port: number;
   user: string;
@@ -53,6 +54,7 @@ function resolveSshConnection(paneSettings: TerminalPaneSettings): SshConnection
   const profile = findSshProfile(loadSettings(), paneSettings.shellProfileId);
   if (!profile) return null;
   return {
+    profileId: profile.id,
     host: profile.host,
     port: profile.port,
     user: profile.user,

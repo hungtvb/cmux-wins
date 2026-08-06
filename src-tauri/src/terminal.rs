@@ -156,6 +156,10 @@ fn is_custom_profile_id(profile_id: &str) -> bool {
 /// confirmation and interactive remote shells all work in the pane.
 #[derive(Clone, Debug, serde::Deserialize)]
 pub(crate) struct SshConnection {
+    /// Profile id of the SSH profile this connection was resolved from.
+    /// Required so the backend can reject ssh spawns that did not go through
+    /// the profile resolver (defense in depth against renderer bugs).
+    pub profile_id: String,
     pub host: String,
     pub port: u16,
     pub user: String,
@@ -163,7 +167,20 @@ pub(crate) struct SshConnection {
     pub identity_file: Option<String>,
 }
 
+/// SSH profile ids look like `ssh:<uuid>` (see `isSshProfileId` in the
+/// frontend). The backend only needs to confirm the shape so a raw spawn
+/// without a resolver-produced id is rejected.
+fn is_valid_ssh_profile_id(value: &str) -> bool {
+    value.starts_with("ssh:") && value.len() > 4 && value[4..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 fn validate_ssh_connection(connection: SshConnection) -> Result<SshConnection, String> {
+    // The profile id is required: ssh spawns must come from the profile
+    // resolver, never from raw renderer-provided connection details.
+    let profile_id = connection.profile_id.trim().to_owned();
+    if profile_id.is_empty() || profile_id.len() > 128 || !is_valid_ssh_profile_id(&profile_id) {
+        return Err("ssh profile id is required and must match the expected format".to_owned());
+    }
     let host = connection.host.trim().to_owned();
     if host.is_empty() || host.len() > 253 {
         return Err("ssh host must be 1 to 253 characters".to_owned());
@@ -325,6 +342,14 @@ fn emit_terminal_lifecycle(app: &AppHandle, session_id: &str, kind: &str, payloa
         kind: kind.to_owned(),
         message: payload.get("error").and_then(Value::as_str).unwrap_or("").to_owned(),
     });
+    // Mirror into the automation event store so agent hooks observe terminal
+    // disconnects/errors, not just interactive output.
+    if let Err(error) = app
+        .state::<AutomationEventStore>()
+        .publish(&format!("terminal.{kind}"), payload.clone())
+    {
+        eprintln!("[TonyMux automation] unable to publish terminal.{kind}: {error}");
+    }
 }
 
 fn publish_terminal_event(app: &AppHandle, kind: &str, payload: Value) {
@@ -842,6 +867,7 @@ mod tests {
     #[test]
     fn ssh_connections_are_validated_and_normalized() {
         let valid = validate_ssh_connection(SshConnection {
+            profile_id: "ssh:dev-server".to_owned(),
             host: "  example.com  ".to_owned(),
             port: 2222,
             user: "tony".to_owned(),
@@ -857,6 +883,7 @@ mod tests {
         );
 
         let bare = validate_ssh_connection(SshConnection {
+            profile_id: "ssh:dev-server".to_owned(),
             host: "10.0.0.7".to_owned(),
             port: 22,
             user: "root".to_owned(),
@@ -866,6 +893,7 @@ mod tests {
         assert_eq!(bare.identity_file, None);
 
         assert!(validate_ssh_connection(SshConnection {
+            profile_id: "ssh:dev-server".to_owned(),
             host: "bad host".to_owned(),
             port: 22,
             user: "tony".to_owned(),
@@ -873,6 +901,7 @@ mod tests {
         })
         .is_err());
         assert!(validate_ssh_connection(SshConnection {
+            profile_id: "ssh:dev-server".to_owned(),
             host: "example.com".to_owned(),
             port: 0,
             user: "tony".to_owned(),
@@ -880,6 +909,7 @@ mod tests {
         })
         .is_err());
         assert!(validate_ssh_connection(SshConnection {
+            profile_id: "ssh:dev-server".to_owned(),
             host: "example.com".to_owned(),
             port: 22,
             user: "bad@user".to_owned(),
@@ -887,7 +917,25 @@ mod tests {
         })
         .is_err());
         assert!(validate_ssh_connection(SshConnection {
+            profile_id: "ssh:dev-server".to_owned(),
             host: "".to_owned(),
+            port: 22,
+            user: "tony".to_owned(),
+            identity_file: None,
+        })
+        .is_err());
+        // A raw spawn without a resolver-produced profile id must be rejected.
+        assert!(validate_ssh_connection(SshConnection {
+            profile_id: "".to_owned(),
+            host: "example.com".to_owned(),
+            port: 22,
+            user: "tony".to_owned(),
+            identity_file: None,
+        })
+        .is_err());
+        assert!(validate_ssh_connection(SshConnection {
+            profile_id: "not-an-ssh-id".to_owned(),
+            host: "example.com".to_owned(),
             port: 22,
             user: "tony".to_owned(),
             identity_file: None,
