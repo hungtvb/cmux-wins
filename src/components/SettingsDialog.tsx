@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -230,6 +231,71 @@ export function SettingsDialog({
   const clearResumeRecords = async () => {
     if (!window.confirm("Clear every saved agent resume session?")) return;
     await invoke<number>("clear_all_resume_records").catch(() => undefined);
+  };
+
+  const [trustedOrigins, setTrustedOrigins] = useState<string[]>([]);
+  const [originInput, setOriginInput] = useState("");
+  const [originNotice, setOriginNotice] = useState<string | null>(null);
+  const [originBusy, setOriginBusy] = useState(false);
+
+  const refreshTrustedOrigins = useCallback(async () => {
+    try {
+      const snapshot = await invoke<{ healthy: boolean; error: string | null; origins: string[] }>(
+        "get_trusted_browser_origins",
+      );
+      setTrustedOrigins(snapshot.origins ?? []);
+      setOriginNotice(snapshot.error ? `Store error: ${snapshot.error}` : null);
+    } catch (error) {
+      setOriginNotice(`Failed to load trusted browser origins: ${String(error)}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    void refreshTrustedOrigins();
+  }, [open, refreshTrustedOrigins]);
+
+  const addTrustedOrigin = async () => {
+    const candidate = originInput.trim();
+    if (!candidate) return;
+    setOriginBusy(true);
+    setOriginNotice(null);
+    try {
+      await invoke("trust_browser_origin", { origin: candidate });
+      setOriginInput("");
+      await refreshTrustedOrigins();
+    } catch (error) {
+      setOriginNotice(String(error));
+    } finally {
+      setOriginBusy(false);
+    }
+  };
+
+  const revokeTrustedOrigin = async (origin: string) => {
+    setOriginBusy(true);
+    setOriginNotice(null);
+    try {
+      await invoke("revoke_browser_origin", { origin });
+      await refreshTrustedOrigins();
+    } catch (error) {
+      setOriginNotice(String(error));
+    } finally {
+      setOriginBusy(false);
+    }
+  };
+
+  const clearTrustedOrigins = async () => {
+    if (!window.confirm("Remove every trusted browser origin?")) return;
+    setOriginBusy(true);
+    setOriginNotice(null);
+    try {
+      await invoke<number>("clear_trusted_browser_origins");
+      await refreshTrustedOrigins();
+    } catch (error) {
+      setOriginNotice(String(error));
+    } finally {
+      setOriginBusy(false);
+    }
   };
 
   useEffect(() => {
@@ -1416,6 +1482,102 @@ export function SettingsDialog({
                 <small>
                   Sessions are saved to the resume store; nothing is executed until you click
                   Resume.
+                </small>
+              </div>
+            </div>
+          </section>
+
+          <section className="settings-section" aria-labelledby="settings-browser-origins-title">
+            <div className="settings-section__heading">
+              <div className="settings-section__heading-main">
+                <ShieldCheck size={15} aria-hidden="true" />
+                <div>
+                  <h3 id="settings-browser-origins-title">Trusted browser origins</h3>
+                  <p className="settings-section__description">
+                    Agents may evaluate JavaScript inside a browser pane only when the pane is on a
+                    loopback address (localhost, 127.0.0.1, ::1) or on an origin you trust here.
+                    Loopback is always allowed and needs no entry.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="agent-integrations">
+              {trustedOrigins.length === 0 ? (
+                <div className="agent-integrations__row">
+                  <div className="agent-integrations__row-main">
+                    <div className="agent-integrations__text">
+                      <strong>No trusted origins</strong>
+                      <small>Browser eval is fail-closed: remote origins require explicit trust.</small>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                trustedOrigins.map((origin) => (
+                  <div className="agent-integrations__row" key={origin}>
+                    <div className="agent-integrations__row-main">
+                      <div className="agent-integrations__text">
+                        <strong>{origin}</strong>
+                        <small>Remote origin allowed for browser.eval</small>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="settings-action"
+                      disabled={originBusy}
+                      onClick={() => void revokeTrustedOrigin(origin)}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              )}
+              <div className="agent-integrations__row agent-integrations__row--input">
+                <div className="agent-integrations__row-main">
+                  <div className="agent-integrations__text">
+                    <strong>Add origin</strong>
+                    <small>e.g. https://example.com or https://example.com:8443</small>
+                  </div>
+                </div>
+                <div className="agent-integrations__add">
+                  <input
+                    type="text"
+                    value={originInput}
+                    placeholder="https://…"
+                    onChange={(event: ChangeEvent<HTMLInputElement>) => setOriginInput(event.target.value)}
+                    onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+                      if (event.key === "Enter") void addTrustedOrigin();
+                    }}
+                    aria-label="Trusted browser origin"
+                  />
+                  <button
+                    type="button"
+                    className="settings-action"
+                    disabled={originBusy || originInput.trim().length === 0}
+                    onClick={() => void addTrustedOrigin()}
+                  >
+                    <Plus size={13} />
+                    Add
+                  </button>
+                </div>
+              </div>
+              {originNotice ? (
+                <div className="agent-integrations__footer">
+                  <small className="agent-integrations__status">{originNotice}</small>
+                </div>
+              ) : null}
+              <div className="agent-integrations__footer">
+                <button
+                  type="button"
+                  className="settings-action"
+                  disabled={originBusy || trustedOrigins.length === 0}
+                  onClick={() => void clearTrustedOrigins()}
+                >
+                  <Trash2 size={13} />
+                  Clear all origins
+                </button>
+                <small>
+                  Loopback origins stay evaluable even with an empty list; this only revokes remote
+                  trust.
                 </small>
               </div>
             </div>

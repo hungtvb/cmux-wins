@@ -49,6 +49,37 @@ The current policy is deliberately fail-closed:
 
 TonyMux does not silently open the system browser, invoke protocol handlers or write downloaded files. A future opt-in external-open or download feature requires a separate allowlisted Rust command, explicit user action, destination/protocol validation and dedicated tests.
 
+## Browser eval gate (Phase 3)
+
+Local automation may execute a bounded JavaScript expression inside a browser
+pane (`browser.eval`) **only** when the pane's current committed origin is:
+
+1. a loopback address — `localhost`, `127.0.0.1`, `::1` (any port) — or
+2. an origin explicitly trusted by the user in Settings → Trusted browser origins.
+
+The gate is enforced in Rust on the pane's *committed* URL (recorded from the
+WebView page-load callback, including redirects), never on client-supplied
+state:
+
+- A pane with no recorded committed URL is refused (`BROWSER_NOT_READY`).
+- The trusted-origin allowlist is empty by default; remote eval is fail-closed
+  until a user adds an origin.
+- Loopback origins are always evaluable and need no allowlist entry.
+- Trusted entries are bare origins (scheme + host + optional explicit port).
+  Paths, credentials, non-HTTP(S) schemes and loopback entries are rejected at
+  trust time.
+- The allowlist is bounded (64 origins, 128 KiB store) and stored per-user
+  under `%LOCALAPPDATA%`.
+
+The expression is bounded to 4 KiB, NUL-free, and its result is fire-and-forget:
+no value is returned to the caller and nothing is written to disk. `browser.eval`
+does not grant the page any Tauri capability; the pane remains remote,
+non-privileged content.
+
+Navigation methods (`browser.navigate`, `browser.reload`, `browser.goBack`,
+`browser.goForward`, `browser.close`) are not origin-gated — they only steer an
+existing pane and remain subject to the navigation policy below.
+
 ## Capability invariant
 
 Do not add a wildcard or browser-label remote capability to `src-tauri/capabilities`.

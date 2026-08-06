@@ -172,6 +172,55 @@ Creates one terminal pane in the target workspace.
 
 Closes one pane. The final pane in a workspace is protected and returns `LAST_PANE_PROTECTED`.
 
+## Browser methods (browser.eval gate)
+
+Browser panes are native WebView2 child webviews owned by Rust. These methods steer
+an existing pane and are bound to the **trusted-origin gate** described in
+`BROWSER-SECURITY.md`:
+
+- `browser.navigate` — navigate the pane to a validated HTTP(S) URL.
+- `browser.reload` / `browser.goBack` / `browser.goForward` — navigation controls.
+- `browser.close` — close the pane.
+- `browser.eval` — **gated**: executes a bounded JavaScript expression in the pane
+  only when the pane's current committed origin is a loopback address
+  (`localhost`, `127.0.0.1`, `::1`) or an explicitly trusted remote origin.
+  A pane with no committed URL yet is refused (`BROWSER_NOT_READY`).
+
+### `browser.navigate`
+
+```json
+{
+  "paneId": "pane-id",
+  "url": "https://example.com/"
+}
+```
+
+`url` is optional and defaults to GitHub. Only HTTP and HTTPS URLs are accepted;
+URLs are limited to 4,096 characters, must not contain control characters and
+must not embed a username or password.
+
+### `browser.eval`
+
+```json
+{
+  "paneId": "pane-id",
+  "expression": "document.querySelector('h1').textContent"
+}
+```
+
+- `expression`: required, 1 to 4,096 UTF-8 bytes, no NUL bytes.
+- The expression runs in the page context. The result is intentionally
+  fire-and-forget: no value is returned to the caller. This matches the browser
+  pane's advisory, non-privileged role.
+- Gate failure returns `ORIGIN_NOT_TRUSTED`; a pane that never committed a URL
+  returns `BROWSER_NOT_READY`; an unparseable recorded URL is refused.
+
+Trusted remote origins are managed in Settings → Trusted browser origins
+(backed by the `trust_browser_origin` / `revoke_browser_origin` /
+`get_trusted_browser_origins` / `clear_trusted_browser_origins` commands). The
+allowlist is empty by default and the feature is fail-closed: no trust entries,
+no remote eval.
+
 ## Rust/UI bridge
 
 Workspace state remains owned by React. Rust validates and canonicalizes method params, emits an event only to the local `main` webview and waits for a matching UI acknowledgement.
@@ -220,15 +269,21 @@ The CLI does not provide a raw-method escape hatch.
 - `UI_TIMEOUT`
 - `BRIDGE_BUSY`
 - `UI_ERROR`
+- `BROWSER_PANE_NOT_FOUND`
+- `BROWSER_NOT_READY`
+- `ORIGIN_NOT_TRUSTED`
+- `INVALID_EXPRESSION`
+- `BROWSER_EVAL_FAILED`
+- `BROWSER_IO_ERROR`
 - `INTERNAL_ERROR`
 
 ## Deferred methods
 
 The following require a separate security and backpressure review:
 
-- `terminal.write`
-- bounded terminal output subscriptions
+- push subscriptions over a persistent client connection
 - terminal lifecycle events
-- browser script execution or DOM automation
+- browser eval **value returns** (currently fire-and-forget; returning DOM
+  snapshots or expression values needs a dedicated result channel and review)
 
 No future method may accept an arbitrary backend command or unrestricted shell execution payload.

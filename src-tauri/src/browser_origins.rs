@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn loopback_never_requires_trust() {
         let path = temp_store();
-        let store = TrustedOriginsStore::from_path(path);
+        let store = TrustedOriginsStore::from_path(path.clone());
         assert!(
             store
                 .is_trusted_url(&Url::parse("http://127.0.0.1:5173/app").unwrap())
@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn defaults_are_fail_closed() {
         let path = temp_store();
-        let store = TrustedOriginsStore::from_path(path);
+        let store = TrustedOriginsStore::from_path(path.clone());
         let snapshot = store.snapshot().unwrap();
         assert!(snapshot.healthy);
         assert!(snapshot.origins.is_empty());
