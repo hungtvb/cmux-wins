@@ -22,7 +22,7 @@ import {
   createTerminalClientId,
   terminalSessionLeases,
 } from "../terminalSessionLease";
-import type { TerminalOutputEvent } from "../types";
+import type { TerminalLifecycleEvent, TerminalOutputEvent } from "../types";
 
 type UseTerminalSessionOptions = {
   workspaceId: string;
@@ -35,6 +35,7 @@ type UseTerminalSessionOptions = {
   onHistoryChange: (history: string) => void;
   onAttention: (message: string) => void;
   onTitleChange: (title: string) => void;
+  onDisconnected?: (message: string) => void;
 };
 
 const notificationPattern = /\x1b\](?:9|99|777);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
@@ -92,6 +93,7 @@ export function useTerminalSession({
   onHistoryChange,
   onAttention,
   onTitleChange,
+  onDisconnected,
 }: UseTerminalSessionOptions) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -100,9 +102,11 @@ export function useTerminalSession({
   const historyLineLimitRef = useRef(historyLineLimit);
   const onHistoryChangeRef = useRef(onHistoryChange);
   const restoredHistoryRef = useRef<string | null>(null);
+  const onDisconnectedRef = useRef(onDisconnected);
 
   historyLineLimitRef.current = historyLineLimit;
   focusedRef.current = focused;
+  onDisconnectedRef.current = onDisconnected;
   onHistoryChangeRef.current = onHistoryChange;
 
   if (restoredHistoryRef.current === null) {
@@ -150,6 +154,7 @@ export function useTerminalSession({
     let started = false;
     let closeScheduled = false;
     let unlisten: UnlistenFn | undefined;
+    let lifecycleUnlisten: UnlistenFn | undefined;
     let notificationBuffer = "";
     let historyCaptureTimer: number | undefined;
     const pendingInput: string[] = [];
@@ -202,6 +207,11 @@ export function useTerminalSession({
 
         terminal.write(event.payload.data);
         scanNotifications(event.payload.data);
+      });
+
+      lifecycleUnlisten = await listen<TerminalLifecycleEvent>("terminal-lifecycle", (event) => {
+        if (event.payload.sessionId !== sessionId || disposed) return;
+        onDisconnectedRef.current?.(event.payload.message || "Terminal session ended");
       });
 
       if (disposed) {
@@ -294,6 +304,7 @@ export function useTerminalSession({
       host.removeEventListener("pointerdown", focusTerminal);
       window.removeEventListener(THEME_CHANGE_EVENT, onThemeChange);
       unlisten?.();
+      lifecycleUnlisten?.();
       if (terminalRef.current === terminal) terminalRef.current = null;
       terminal.dispose();
       scheduleOwnedClose();

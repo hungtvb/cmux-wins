@@ -23,7 +23,7 @@ import {
   countAttention,
   type NotificationItem,
 } from "./notificationModel";
-import type { AppSettings } from "./settings";
+import { isSshProfileId, type AppSettings } from "./settings";
 import { requestOpenSettings } from "./settingsEvents";
 import {
   formatShortcutBinding,
@@ -36,6 +36,7 @@ import type { Pane, TerminalPaneModel, Workspace } from "./types";
 import {
   WORKSPACE_STATE_VERSION,
   createBrowserPane,
+  createSshTerminalPane,
   createTerminalPane,
   createWorkspace,
   loadWorkspaceState,
@@ -193,6 +194,24 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
     setActivePaneByWorkspace((current) => ({ ...current, [activeWorkspace.id]: pane.id }));
   }, [activeWorkspace, settings]);
 
+  const addSshPane = useCallback(
+    (profileId: string) => {
+      if (!activeWorkspace) return;
+      const profile = settings.sshProfiles.find((candidate) => candidate.id === profileId);
+      if (!profile) return;
+      const pane = createSshTerminalPane(settings, profile);
+      setWorkspaces((current) =>
+        current.map((workspace) =>
+          workspace.id === activeWorkspace.id
+            ? { ...workspace, panes: [...workspace.panes, pane] }
+            : workspace,
+        ),
+      );
+      setActivePaneByWorkspace((current) => ({ ...current, [activeWorkspace.id]: pane.id }));
+    },
+    [activeWorkspace, settings],
+  );
+
   const addBrowserPane = useCallback(() => {
     if (!activeWorkspace) return;
 
@@ -234,6 +253,39 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
       }),
     );
   }, [settings]);
+
+  const reconnectPane = useCallback(
+    (paneId: string) => {
+      if (!activeWorkspace) return;
+      const pane = activeWorkspace.panes.find((candidate) => candidate.id === paneId);
+      if (!pane || pane.kind !== "terminal") return;
+
+      const isSsh = isSshProfileId(pane.terminalSettings?.shellProfileId ?? "");
+      const profile = settings.sshProfiles.find(
+        (candidate) => candidate.id === pane.terminalSettings?.shellProfileId,
+      );
+      if (isSsh && !profile) return;
+
+      const replacement = isSsh
+        ? createSshTerminalPane(settings, profile!)
+        : createTerminalPane(settings, activeWorkspace.cwd);
+
+      setWorkspaces((current) =>
+        current.map((workspace) =>
+          workspace.id === activeWorkspace.id
+            ? {
+                ...workspace,
+                panes: workspace.panes.map((candidate) =>
+                  candidate.id === paneId ? { ...replacement, id: paneId } : candidate,
+                ),
+              }
+            : workspace,
+        ),
+      );
+      setActivePaneByWorkspace((current) => ({ ...current, [activeWorkspace.id]: paneId }));
+    },
+    [activeWorkspace, settings],
+  );
 
   const closeWorkspace = useCallback((workspaceId: string) => {
     setWorkspaces((current) => {
@@ -470,6 +522,14 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
         shortcut: shortcutLabel("pane.splitTerminal"),
         run: splitTerminalPane,
       },
+      ...settings.sshProfiles.map((profile) => ({
+        id: `pane.ssh.${profile.id}`,
+        label: `Connect to ${profile.label}`,
+        description: `SSH ${profile.user}@${profile.host}:${profile.port}`,
+        keywords: ["ssh", "remote", "shell", profile.label, profile.host, profile.user],
+        section: "SSH connections",
+        run: () => addSshPane(profile.id),
+      })),
       {
         id: "pane.open-browser",
         label: "Open browser pane",
@@ -527,12 +587,14 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
   }, [
     activeWorkspace,
     addBrowserPane,
+    addSshPane,
     addWorkspace,
     attention,
     clearAttention,
     closeWorkspace,
     notificationsOpen,
     selectWorkspace,
+    settings.sshProfiles,
     shortcutLabel,
     sidebarOpen,
     splitTerminalPane,
@@ -700,6 +762,7 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
                         onHistoryChange={handleHistoryChange}
                         onAttention={handleAttention}
                         onTitleChange={handleTitleChange}
+                        onReconnect={reconnectPane}
                         onClose={closePane}
                       />
                     );

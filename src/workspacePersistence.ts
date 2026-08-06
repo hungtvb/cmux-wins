@@ -1,8 +1,10 @@
 import {
   DEFAULT_SETTINGS,
   normalizeTerminalPaneSettings,
+  snapshotSshTerminalSettings,
   snapshotTerminalSettings,
   type AppSettings,
+  type SshProfile,
 } from "./settings";
 import {
   MAX_TERMINAL_HISTORY_BYTES_PER_PANE,
@@ -117,6 +119,27 @@ export function createTerminalPane(
     kind: "terminal",
     title,
     terminalSettings: snapshotTerminalSettings(settings, workspaceDirectory),
+  };
+}
+
+/**
+ * Create a terminal pane backed by an SSH profile. The pane title carries the
+ * profile label and the terminal settings reference the SSH profile id, which
+ * `resolveSshConnection` turns into an `ssh.exe` spawn with the connection
+ * details resolved from the profile at spawn time (credentials never enter
+ * persistence).
+ */
+export function createSshTerminalPane(
+  settings: AppSettings,
+  profile: SshProfile,
+  title = profile.label,
+  idFactory: IdFactory = defaultIdFactory,
+): Pane {
+  return {
+    id: idFactory(),
+    kind: "terminal",
+    title,
+    terminalSettings: snapshotSshTerminalSettings(settings, profile.id),
   };
 }
 

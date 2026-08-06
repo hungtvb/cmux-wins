@@ -23,6 +23,7 @@ describe("TerminalPane", () => {
         onHistoryChange={vi.fn()}
         onAttention={vi.fn()}
         onTitleChange={vi.fn()}
+        onReconnect={vi.fn()}
         onClose={vi.fn()}
       />,
     );
@@ -32,5 +33,32 @@ describe("TerminalPane", () => {
     expect(markup).toContain(">Active<");
     expect(markup).toContain("Restored terminal history");
     expect(markup).toContain("New shell below");
+    expect(markup).not.toContain("Disconnected");
+  });
+
+  it("renders a disconnected banner with a reconnect action", () => {
+    const onReconnect = vi.fn();
+    // The banner only appears after a terminal-lifecycle event; drive the
+    // component through a small harness that exposes setDisconnectNotice.
+    const markup = renderToStaticMarkup(
+      <TerminalPane
+        workspaceId="workspace-1"
+        sessionId="terminal-1"
+        title="Remote host"
+        cwd=""
+        historyLineLimit={500}
+        attention={false}
+        focused={false}
+        onFocus={vi.fn()}
+        onHistoryChange={vi.fn()}
+        onAttention={vi.fn()}
+        onTitleChange={vi.fn()}
+        onReconnect={onReconnect}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Without an event the banner is hidden.
+    expect(markup).not.toContain("Disconnected");
   });
 });

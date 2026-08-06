@@ -494,6 +494,25 @@ export function snapshotTerminalSettings(
   };
 }
 
+/**
+ * Build terminal pane settings for an SSH profile. The returned settings carry
+ * the SSH profile id in `shellProfileId` so `resolveSshConnection` can look the
+ * connection up when spawning the pane. `cwd` is intentionally not applied:
+ * the remote working directory is owned by the SSH session (the local `cwd`
+ * would only affect the initial ssh.exe process).
+ */
+export function snapshotSshTerminalSettings(
+  settings: AppSettings,
+  profileId: string,
+): TerminalPaneSettings {
+  return {
+    shellProfileId: profileId,
+    workingDirectory: "",
+    startupCommand: settings.startupCommand,
+    appearance: { ...settings.terminal },
+  };
+}
+
 export function validateSettings(settings: AppSettings): string[] {
   const errors: string[] = [];
   if (/[\0\r\n]/.test(settings.defaultWorkingDirectory)) {

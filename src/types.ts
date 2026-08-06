@@ -49,3 +49,9 @@ export type TerminalOutputEvent = {
   sessionId: string;
   data: string;
 };
+
+export type TerminalLifecycleEvent = {
+  sessionId: string;
+  kind: "exited" | "error" | string;
+  message: string;
+};

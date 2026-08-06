@@ -5,6 +5,7 @@ import {
   terminalHistoryByteLength,
 } from "./terminalHistory";
 import {
+  createSshTerminalPane,
   LEGACY_WORKSPACE_STORAGE_KEYS,
   MAX_SPLIT_RATIO,
   MIN_SPLIT_RATIO,
@@ -335,5 +336,38 @@ describe("workspace persistence", () => {
     expect(storage.has(WORKSPACE_STATE_PREVIOUS_KEY)).toBe(false);
     for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) expect(storage.has(key)).toBe(false);
     expect(storage.value("tonymux.settings.v3")).toBe("settings");
+  });
+});
+
+describe("createSshTerminalPane", () => {
+  const sshSettings: AppSettings = {
+    ...DEFAULT_SETTINGS,
+    sshProfiles: [
+      {
+        id: "ssh:dev-server",
+        label: "Dev server",
+        host: "dev.internal",
+        port: 2222,
+        user: "deploy",
+        identityFile: "C:\\Users\\tony\\.ssh\\id_ed25519",
+      },
+    ],
+  };
+
+  it("creates a terminal pane whose settings reference the SSH profile id", () => {
+    const pane = createSshTerminalPane(sshSettings, sshSettings.sshProfiles[0]);
+
+    expect(pane.kind).toBe("terminal");
+    expect(pane.title).toBe("Dev server");
+    if (pane.kind !== "terminal") throw new Error("expected a terminal pane");
+    expect(pane.terminalSettings?.shellProfileId).toBe("ssh:dev-server");
+    // The SSH profile must be resolvable at spawn time through the profile id.
+    expect(sshSettings.sshProfiles.some((p) => p.id === pane.terminalSettings?.shellProfileId)).toBe(true);
+  });
+
+  it("does not carry a local working directory for SSH panes", () => {
+    const pane = createSshTerminalPane(sshSettings, sshSettings.sshProfiles[0]);
+    if (pane.kind !== "terminal") throw new Error("expected a terminal pane");
+    expect(pane.terminalSettings?.workingDirectory).toBe("");
   });
 });

@@ -1,5 +1,5 @@
-import { BellRing, History, SquareTerminal, X } from "lucide-react";
-import { memo, useCallback, useId, useRef, type CSSProperties } from "react";
+import { BellRing, History, RefreshCw, SquareTerminal, X } from "lucide-react";
+import { memo, useCallback, useId, useRef, useState, type CSSProperties } from "react";
 import { useTerminalSession } from "../hooks/useTerminalSession";
 import type { TerminalPaneSettings } from "../settings";
 
@@ -18,6 +18,7 @@ type TerminalPaneProps = {
   onHistoryChange: (sessionId: string, history: string) => void;
   onAttention: (sessionId: string, message: string) => void;
   onTitleChange: (sessionId: string, title: string) => void;
+  onReconnect: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
 };
 
@@ -36,9 +37,11 @@ function TerminalPaneComponent({
   onHistoryChange,
   onAttention,
   onTitleChange,
+  onReconnect,
   onClose,
 }: TerminalPaneProps) {
   const historyTitleId = useId();
+  const [disconnectNotice, setDisconnectNotice] = useState<string | null>(null);
   const initialRestoredHistoryRef = useRef<string | null>(null);
   if (initialRestoredHistoryRef.current === null) {
     initialRestoredHistoryRef.current = restored ? restoredHistory ?? "" : "";
@@ -66,6 +69,10 @@ function TerminalPaneComponent({
     (nextTitle: string) => onTitleChange(sessionId, nextTitle),
     [onTitleChange, sessionId],
   );
+  const handleDisconnected = useCallback(
+    (message: string) => setDisconnectNotice(message),
+    [],
+  );
   const hostRef = useTerminalSession({
     workspaceId,
     sessionId,
@@ -77,6 +84,7 @@ function TerminalPaneComponent({
     onHistoryChange: handleHistoryChange,
     onAttention: handleAttention,
     onTitleChange: handleTitleChange,
+    onDisconnected: handleDisconnected,
   });
 
   return (
@@ -139,6 +147,27 @@ function TerminalPaneComponent({
             <span>Restored history</span>
             <strong>New shell below</strong>
           </div>
+        </aside>
+      )}
+
+      {disconnectNotice && (
+        <aside
+          className="terminal-pane__disconnected"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="terminal-pane__disconnected-copy">
+            <strong>Disconnected</strong>
+            {disconnectNotice && <small>{disconnectNotice}</small>}
+          </span>
+          <button
+            type="button"
+            className="pane-disconnect-action"
+            onClick={() => onReconnect(sessionId)}
+          >
+            <RefreshCw size={13} aria-hidden="true" />
+            Reconnect
+          </button>
         </aside>
       )}
 

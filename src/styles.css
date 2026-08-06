@@ -1034,6 +1034,54 @@ input:focus-visible {
   overflow: hidden;
 }
 
+.terminal-pane__disconnected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 8px 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--tm-warning-border, var(--border-subtle));
+  border-radius: 8px;
+  background: var(--tm-warning-soft, var(--surface-1));
+  color: var(--tm-text);
+}
+
+.terminal-pane__disconnected-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.terminal-pane__disconnected-copy strong {
+  font-size: 12px;
+}
+
+.terminal-pane__disconnected-copy small {
+  color: var(--tm-text-faint);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.pane-disconnect-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border: 1px solid var(--tm-brand-border);
+  border-radius: 6px;
+  background: var(--tm-brand-soft);
+  color: var(--tm-brand-strong);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pane-disconnect-action:hover {
+  background: var(--tm-brand-soft-strong);
+}
+
 .terminal-pane__host .xterm,
 .terminal-pane__host .xterm-viewport {
   height: 100%;
