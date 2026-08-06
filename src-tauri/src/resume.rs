@@ -14,6 +14,7 @@ use std::{
 /// is data only — it is never executed; the app validates the executable
 /// against the trusted-shell store before spawning anything.
 
+#[allow(dead_code)] // format version marker kept for future store migrations; mirror of ts side
 pub const RESUME_STORE_VERSION: u32 = 1;
 const MAX_STORE_BYTES: u64 = 1024 * 1024;
 const MAX_LINE_BYTES: usize = 32 * 1024;
@@ -35,6 +36,7 @@ impl AgentKind {
         }
     }
 
+    #[allow(dead_code)] // mirror of AGENT_DISPLAY_NAMES in src/resumeModel.ts
     pub fn display_name(self) -> &'static str {
         match self {
             AgentKind::Claude => "Claude Code",
@@ -56,6 +58,7 @@ pub fn parse_agent(value: &str) -> Result<AgentKind, String> {
 /// Resolve a candidate executable (bare name or path) against PATH, returning
 /// the first existing file. Bare names like `claude` resolve like the shell
 /// would on Windows (`PATH`-ordered, `PATHEXT`-suffixed candidates).
+#[allow(dead_code)] // used by tests; future backend trust-gate entry point
 pub fn resolve_executable_path(candidate: &str) -> Option<PathBuf> {
     if candidate.is_empty() {
         return None;
@@ -112,6 +115,7 @@ impl ResumeRecord {
     /// execute as its startup command (typed into the shell, not spawned).
     /// Single-quote every argument PowerShell-style: paths with spaces or
     /// quotes survive; a literal `'` becomes `''`.
+    #[allow(dead_code)] // mirror of toStartupCommand in src/resumeModel.ts
     pub fn to_startup_command(&self) -> String {
         let mut parts = Vec::with_capacity(1 + self.args.len());
         parts.push(quote_powershell_arg(&self.executable));
@@ -122,6 +126,7 @@ impl ResumeRecord {
     }
 }
 
+#[allow(dead_code)] // used by to_startup_command (mirror of quotePowerShellArg in resumeModel.ts)
 fn quote_powershell_arg(value: &str) -> String {
     if value.is_empty() {
         return "''".to_owned();
@@ -159,6 +164,7 @@ pub fn resume_store_path() -> Result<PathBuf, String> {
 }
 
 /// Append a record as one JSONL line, creating the directory if needed.
+#[allow(dead_code)] // used by tests; entry point for future Rust-side recorders
 pub fn append_record(path: &Path, record: &ResumeRecord) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -230,6 +236,7 @@ pub fn latest_by_agent_and_cwd(records: &[ResumeRecord]) -> Vec<ResumeRecord> {
 }
 
 /// Find the newest record for one (agent, cwd) pair.
+#[allow(dead_code)] // used by tests; helper for future targeted-resume lookups
 pub fn find_latest(records: &[ResumeRecord], agent: AgentKind, cwd: &str) -> Option<ResumeRecord> {
     latest_by_agent_and_cwd(records)
         .into_iter()
