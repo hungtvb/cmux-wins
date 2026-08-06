@@ -253,10 +253,7 @@ jobs:
 
           Compare the result with `SHA256SUMS.txt` before extraction or installation.
           '@
-          $renderedNotes = $releaseNotes
-            .Replace("__VERSION__", $version)
-            .Replace("__COMMIT__", $env:GITHUB_SHA)
-            .Replace("__SIGNING_NOTE__", $signingNote)
+          $renderedNotes = $releaseNotes.Replace("__VERSION__", $version).Replace("__COMMIT__", $env:GITHUB_SHA).Replace("__SIGNING_NOTE__", $signingNote)
           $renderedNotes | Set-Content release-notes.md
 
       - name: Upload immutable workflow artifact
