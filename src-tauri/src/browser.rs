@@ -233,6 +233,18 @@ pub(crate) async fn create_browser_pane(
         .add_child(builder, position, size)
         .map_err(|error| format!("unable to create browser pane: {error}"))?;
 
+    // Some Tauri/WebView2 versions apply child-webview bounds lazily. Re-apply
+    // the exact measured rectangle right after creation so the native surface
+    // can never start out offset from its host (see P0 issue #69).
+    if let Some(webview) = app.get_webview(&label) {
+        webview
+            .set_position(position)
+            .map_err(|error| format!("unable to position browser pane: {error}"))?;
+        webview
+            .set_size(size)
+            .map_err(|error| format!("unable to resize browser pane: {error}"))?;
+    }
+
     Ok(())
 }
 

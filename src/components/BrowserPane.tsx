@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   memo,
   useCallback,
@@ -259,6 +260,8 @@ function BrowserPaneComponent({
     [beginLoading, paneId],
   );
 
+  const lastBoundsRef = useRef<string | null>(null);
+
   const syncBounds = useCallback(async () => {
     const host = hostRef.current;
     if (!host || disposedRef.current) return;
@@ -274,6 +277,14 @@ function BrowserPaneComponent({
       height: Math.round(rect.height),
     };
 
+    // The native WebView2 surface is positioned in window coordinates and is
+    // not automatically re-aligned when the window moves across monitors or
+    // the DPI scale changes. Only re-invoke when the measured rectangle
+    // actually differs so that move/scale events re-apply bounds without
+    // spamming the Rust side on every animation frame.
+    const signature = `${bounds.x},${bounds.y},${bounds.width},${bounds.height}`;
+    if (lastBoundsRef.current === signature && createdRef.current) return;
+
     try {
       await ensureCreated(bounds);
       if (disposedRef.current || !createdRef.current) return;
@@ -282,6 +293,7 @@ function BrowserPaneComponent({
       // callbacks may share the same create promise and the first callback's
       // bounds must not overwrite a later layout.
       await invoke("set_browser_pane_bounds", bounds);
+      lastBoundsRef.current = signature;
     } catch (cause) {
       if (!disposedRef.current) showError(cause);
     }
@@ -296,6 +308,8 @@ function BrowserPaneComponent({
     setNativeReady(false);
     let animationFrame = 0;
     let unlisten: UnlistenFn | undefined;
+    let unlistenMoved: UnlistenFn | undefined;
+    let unlistenScale: UnlistenFn | undefined;
     let observing = false;
 
     const scheduleSync = () => {
@@ -304,6 +318,7 @@ function BrowserPaneComponent({
     };
 
     const observer = new ResizeObserver(scheduleSync);
+    const windowApi = getCurrentWindow();
     const listenerReady = listen<unknown>(BROWSER_PANE_EVENT_NAME, (event) => {
       handleBrowserEvent(event.payload);
     }).then((dispose) => {
@@ -315,6 +330,15 @@ function BrowserPaneComponent({
       observer.observe(host);
       observing = true;
       window.addEventListener("resize", scheduleSync);
+      // WebView2 child controllers do not follow the parent window across
+      // monitor moves or DPI changes; re-apply the measured bounds whenever
+      // the window reports a move or a scale-factor change.
+      void windowApi.onMoved(scheduleSync).then((dispose) => {
+        unlistenMoved = dispose;
+      });
+      void windowApi.onScaleChanged(scheduleSync).then((dispose) => {
+        unlistenScale = dispose;
+      });
       scheduleSync();
     });
     listenerReadyRef.current = listenerReady;
@@ -330,6 +354,8 @@ function BrowserPaneComponent({
       if (observing) observer.disconnect();
       window.removeEventListener("resize", scheduleSync);
       unlisten?.();
+      unlistenMoved?.();
+      unlistenScale?.();
       createdRef.current = false;
       closeNativePane();
     };
