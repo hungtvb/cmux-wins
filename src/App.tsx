@@ -403,7 +403,7 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
       const pane: Pane = {
         ...terminalBase,
         terminalSettings: {
-          ...terminalBase.terminalSettings,
+          ...terminalBase.terminalSettings!,
           startupCommand: toStartupCommand(record),
         },
       };
