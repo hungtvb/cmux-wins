@@ -7,6 +7,8 @@ type ResumeMenuProps = {
   notice: string | null;
   onResume: (record: ResumeRecord) => void;
   onOpenSettings: () => void;
+  /** Start with the popover open (used by SSR/static render tests). */
+  defaultOpen?: boolean;
 };
 
 /**
@@ -15,8 +17,8 @@ type ResumeMenuProps = {
  * directory; clicking a row gates on the trusted-executable store, then opens
  * a new terminal pane with the resume command as its startup command.
  */
-export function ResumeMenu({ records, notice, onResume, onOpenSettings }: ResumeMenuProps) {
-  const [open, setOpen] = useState(false);
+export function ResumeMenu({ records, notice, onResume, onOpenSettings, defaultOpen = false }: ResumeMenuProps) {
+  const [open, setOpen] = useState(defaultOpen);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {

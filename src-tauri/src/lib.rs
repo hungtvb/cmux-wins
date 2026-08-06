@@ -1,10 +1,13 @@
 pub mod automation;
+mod agent_hooks;
 mod browser;
+mod resume;
 mod terminal;
 mod terminal_automation;
 mod trusted_shells;
 mod workspace_metadata;
 
+use agent_hooks::setup_agent_hooks;
 use automation::{
     bridge::{resolve_automation_request, set_automation_frontend_ready, AutomationBridge},
     events::AutomationEventStore,
@@ -14,6 +17,9 @@ use browser::{
     browser_go_back, browser_go_forward, close_browser_pane, create_browser_pane,
     hide_browser_pane, navigate_browser_pane, reload_browser_pane, set_browser_pane_bounds,
     show_browser_pane,
+};
+use resume::{
+    clear_all_resume_records, clear_resume_record, get_resume_records,
 };
 use terminal::{
     close_terminal, get_workspace_metadata_batch, resize_terminal, spawn_terminal, write_terminal,
@@ -58,7 +64,11 @@ pub fn run() {
             is_shell_executable_trusted,
             get_trusted_shell_store,
             revoke_shell_executable,
-            clear_trusted_shell_executables
+            clear_trusted_shell_executables,
+            get_resume_records,
+            clear_resume_record,
+            clear_all_resume_records,
+            setup_agent_hooks
         ])
         .run(tauri::generate_context!())
         .expect("error while running TonyMux");
