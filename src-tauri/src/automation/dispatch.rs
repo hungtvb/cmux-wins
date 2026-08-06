@@ -7,6 +7,7 @@ use tauri::{AppHandle, Manager};
 
 use super::{
     bridge::{request as bridge_request, AutomationBridge},
+    browser_methods::{prepare_browser_method, PreparedBrowserMethod},
     event_methods::{prepare_event_method, PreparedEventRead},
     events::{AutomationEventReadResult, AutomationEventStore},
     methods::prepare_frontend_method,
@@ -61,10 +62,16 @@ pub(crate) async fn dispatch(
         _ => match prepare_terminal_method(&method, params.clone()) {
             Err(error) => AutomationResponse::failure(request_id, error.code, error.message),
             Ok(Some(prepared)) => dispatch_terminal_method(request_id, app, prepared).await,
-            Ok(None) => match prepare_event_method(&method, params.clone()) {
+            Ok(None) => match prepare_browser_method(&method, params.clone()) {
                 Err(error) => AutomationResponse::failure(request_id, error.code, error.message),
-                Ok(Some(prepared)) => dispatch_event_read(request_id, app, prepared).await,
-                Ok(None) => dispatch_frontend_method(request_id, app, &method, params).await,
+                Ok(Some(prepared)) => {
+                    dispatch_browser_method(request_id, app, prepared).await
+                }
+                Ok(None) => match prepare_event_method(&method, params.clone()) {
+                    Err(error) => AutomationResponse::failure(request_id, error.code, error.message),
+                    Ok(Some(prepared)) => dispatch_event_read(request_id, app, prepared).await,
+                    Ok(None) => dispatch_frontend_method(request_id, app, &method, params).await,
+                },
             },
         },
     }
@@ -136,6 +143,78 @@ async fn dispatch_event_read(
     match read_events(store.inner(), &prepared).await {
         Ok(result) => serialize_success(request_id, result, "automation events"),
         Err(error) => AutomationResponse::failure(request_id, "INTERNAL_ERROR", error),
+    }
+}
+
+async fn dispatch_browser_method(
+    request_id: String,
+    app: Option<&AppHandle>,
+    prepared: PreparedBrowserMethod,
+) -> AutomationResponse {
+    let Some(app) = app else {
+        return AutomationResponse::failure(
+            request_id,
+            "INTERNAL_ERROR",
+            "browser automation state is not available",
+        );
+    };
+
+    let result = match prepared {
+        PreparedBrowserMethod::Navigate { pane_id, url } => {
+            crate::browser::navigate_browser_pane(app.clone(), pane_id.clone(), url.clone())
+                .map(|_| json!({ "paneId": pane_id, "url": url }))
+        }
+        PreparedBrowserMethod::Reload { pane_id } => {
+            crate::browser::reload_browser_pane(app.clone(), pane_id.clone())
+                .map(|_| json!({ "paneId": pane_id }))
+        }
+        PreparedBrowserMethod::GoBack { pane_id } => {
+            crate::browser::browser_go_back(app.clone(), pane_id.clone())
+                .map(|_| json!({ "paneId": pane_id }))
+        }
+        PreparedBrowserMethod::GoForward { pane_id } => {
+            crate::browser::browser_go_forward(app.clone(), pane_id.clone())
+                .map(|_| json!({ "paneId": pane_id }))
+        }
+        PreparedBrowserMethod::Close { pane_id } => {
+            crate::browser::close_browser_pane(app.clone(), pane_id.clone())
+                .map(|_| json!({ "paneId": pane_id, "closed": true }))
+        }
+        PreparedBrowserMethod::Eval { pane_id, expression } => {
+            let origins = app.state::<crate::browser_origins::TrustedOriginsStore>();
+            crate::browser::evaluate_browser_pane(
+                app.clone(),
+                origins,
+                pane_id.clone(),
+                expression.clone(),
+            )
+            .map(|_| json!({ "paneId": pane_id }))
+        }
+    };
+
+    match result {
+        Ok(result) => AutomationResponse::success(request_id, result),
+        Err(error) => {
+            AutomationResponse::failure(request_id, browser_error_code(&error), error)
+        }
+    }
+}
+
+fn browser_error_code(error: &str) -> &'static str {
+    if error.starts_with("browser pane not found:") {
+        "BROWSER_PANE_NOT_FOUND"
+    } else if error.starts_with("origin is not trusted for browser.eval") {
+        "ORIGIN_NOT_TRUSTED"
+    } else if error.starts_with("browser pane has no committed URL yet")
+        || error.starts_with("browser pane recorded an unparseable URL")
+    {
+        "BROWSER_NOT_READY"
+    } else if error.starts_with("eval expression must") {
+        "INVALID_EXPRESSION"
+    } else if error.starts_with("unable to evaluate expression") {
+        "BROWSER_EVAL_FAILED"
+    } else {
+        "BROWSER_IO_ERROR"
     }
 }
 
@@ -313,6 +392,34 @@ mod tests {
         assert_eq!(
             terminal_error_code("unable to write to terminal: broken pipe"),
             "TERMINAL_IO_ERROR"
+        );
+    }
+
+    #[test]
+    fn classifies_browser_errors_without_leaking_internal_codes() {
+        assert_eq!(
+            browser_error_code("browser pane not found: pane-1"),
+            "BROWSER_PANE_NOT_FOUND"
+        );
+        assert_eq!(
+            browser_error_code("origin is not trusted for browser.eval (loopback or trusted origins only): https://example.com"),
+            "ORIGIN_NOT_TRUSTED"
+        );
+        assert_eq!(
+            browser_error_code("browser pane has no committed URL yet; evaluate only after load-finished: pane-1"),
+            "BROWSER_NOT_READY"
+        );
+        assert_eq!(
+            browser_error_code("eval expression must contain 1 to 4096 UTF-8 bytes"),
+            "INVALID_EXPRESSION"
+        );
+        assert_eq!(
+            browser_error_code("unable to evaluate expression in browser pane: boom"),
+            "BROWSER_EVAL_FAILED"
+        );
+        assert_eq!(
+            browser_error_code("unable to navigate browser pane: timeout"),
+            "BROWSER_IO_ERROR"
         );
     }
 }

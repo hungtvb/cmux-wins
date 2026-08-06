@@ -1,5 +1,7 @@
 pub mod bridge;
 #[cfg(windows)]
+mod browser_methods;
+#[cfg(windows)]
 mod cli_parser;
 #[cfg(windows)]
 pub mod client;

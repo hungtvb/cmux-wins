@@ -1,9 +1,15 @@
 use serde::Serialize;
+use std::{
+    collections::HashMap,
+    sync::Mutex,
+};
 use tauri::{
     webview::{DownloadEvent, NewWindowResponse, PageLoadEvent, WebviewBuilder},
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, WebviewUrl,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
 };
 use url::Url;
+
+use crate::browser_origins::TrustedOriginsStore;
 
 const BROWSER_EVENT_NAME: &str = "browser-pane-event";
 const MAIN_WEBVIEW_LABEL: &str = "main";
@@ -11,6 +17,34 @@ const MAX_BROWSER_PANE_ID_LENGTH: usize = 128;
 const MAX_BROWSER_URL_LENGTH: usize = 2_048;
 const MAX_BROWSER_TITLE_CHARS: usize = 128;
 const MAX_BROWSER_MESSAGE_CHARS: usize = 512;
+const MAX_EVAL_EXPRESSION_BYTES: usize = 4 * 1024;
+
+/// Current committed URL per browser pane, updated by the page-load callback.
+/// This is the authoritative input to the `browser.eval` origin gate: a pane
+/// with no recorded load is never evaluable (fail-closed).
+#[derive(Default)]
+pub(crate) struct BrowserUrlRegistry(pub(crate) Mutex<HashMap<String, String>>);
+
+impl BrowserUrlRegistry {
+    pub(crate) fn record(&self, pane_id: &str, url: &Url) {
+        if let Ok(mut entries) = self.0.lock() {
+            entries.insert(pane_id.to_owned(), url.to_string());
+        }
+    }
+
+    pub(crate) fn current(&self, pane_id: &str) -> Option<String> {
+        self.0
+            .lock()
+            .ok()
+            .and_then(|entries| entries.get(pane_id).cloned())
+    }
+
+    pub(crate) fn remove(&self, pane_id: &str) {
+        if let Ok(mut entries) = self.0.lock() {
+            entries.remove(pane_id);
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -217,6 +251,11 @@ pub(crate) async fn create_browser_pane(
                 None,
                 None,
             );
+            // Keep the committed-URL registry fresh so the eval gate reflects
+            // the page the pane is actually showing, including redirects.
+            if let Some(registry) = load_app.try_state::<BrowserUrlRegistry>() {
+                registry.record(&load_pane_id, payload.url());
+            }
         })
         .on_document_title_changed(move |_webview, title| {
             emit_browser_event(
@@ -320,7 +359,61 @@ pub(crate) fn close_browser_pane(app: AppHandle, pane_id: String) -> Result<(), 
             .close()
             .map_err(|error| format!("unable to close browser pane: {error}"))?;
     }
+    if let Some(registry) = app.try_state::<BrowserUrlRegistry>() {
+        registry.remove(&pane_id);
+    }
     Ok(())
+}
+
+fn validate_eval_expression(expression: &str) -> Result<(), String> {
+    if expression.is_empty() || expression.len() > MAX_EVAL_EXPRESSION_BYTES {
+        return Err(format!(
+            "eval expression must contain 1 to {MAX_EVAL_EXPRESSION_BYTES} UTF-8 bytes"
+        ));
+    }
+    if expression.as_bytes().contains(&0) {
+        return Err("eval expression must not contain NUL bytes".to_owned());
+    }
+    Ok(())
+}
+
+/// Execute a bounded JavaScript expression in a browser pane, gated by the
+/// trusted-origin allowlist: loopback URLs are always allowed, remote origins
+/// only when the user explicitly trusted them. A pane with no recorded
+/// committed URL is never evaluable. The expression runs in the page context
+/// and its result is intentionally fire-and-forget (no value is returned to
+/// the caller); this matches the browser pane's advisory, non-privileged role.
+#[tauri::command]
+pub(crate) fn evaluate_browser_pane(
+    app: AppHandle,
+    origins: State<'_, TrustedOriginsStore>,
+    pane_id: String,
+    expression: String,
+) -> Result<(), String> {
+    let webview = get_browser_webview(&app, &pane_id)?;
+    validate_eval_expression(&expression)?;
+
+    let Some(current) = app
+        .try_state::<BrowserUrlRegistry>()
+        .and_then(|registry| registry.current(&pane_id))
+    else {
+        return Err(format!(
+            "browser pane has no committed URL yet; evaluate only after load-finished: {pane_id}"
+        ));
+    };
+    let url = Url::parse(&current).map_err(|error| {
+        format!("browser pane recorded an unparseable URL and cannot be evaluated: {error}")
+    })?;
+    if !origins.is_trusted_url(&url)? {
+        return Err(format!(
+            "origin is not trusted for browser.eval (loopback or trusted origins only): {}",
+            current
+        ));
+    }
+
+    webview
+        .eval(&expression)
+        .map_err(|error| format!("unable to evaluate expression in browser pane: {error}"))
 }
 
 #[cfg(test)]
@@ -375,5 +468,25 @@ mod tests {
         let safe_url = Url::parse("https://example.com/path").expect("parse safe URL");
         assert!(!is_allowed_browser_url(&unsafe_url));
         assert!(is_allowed_browser_url(&safe_url));
+    }
+
+    #[test]
+    fn eval_expression_is_bounded_and_nul_free() {
+        assert!(validate_eval_expression("document.title").is_ok());
+        assert!(validate_eval_expression("").is_err());
+        assert!(validate_eval_expression("a\0b").is_err());
+        assert!(validate_eval_expression(&"x".repeat(MAX_EVAL_EXPRESSION_BYTES)).is_ok());
+        assert!(validate_eval_expression(&"x".repeat(MAX_EVAL_EXPRESSION_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn url_registry_records_current_and_removes() {
+        let registry = BrowserUrlRegistry::default();
+        let url = Url::parse("https://example.com/page").expect("parse url");
+        assert_eq!(registry.current("pane-1"), None);
+        registry.record("pane-1", &url);
+        assert_eq!(registry.current("pane-1").as_deref(), Some("https://example.com/page"));
+        registry.remove("pane-1");
+        assert_eq!(registry.current("pane-1"), None);
     }
 }

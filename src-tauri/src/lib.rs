@@ -1,6 +1,7 @@
 pub mod automation;
 mod agent_hooks;
 mod browser;
+mod browser_origins;
 mod resume;
 mod terminal;
 mod terminal_automation;
@@ -15,8 +16,12 @@ use automation::{
 };
 use browser::{
     browser_go_back, browser_go_forward, close_browser_pane, create_browser_pane,
-    hide_browser_pane, navigate_browser_pane, reload_browser_pane, set_browser_pane_bounds,
-    show_browser_pane,
+    evaluate_browser_pane, hide_browser_pane, navigate_browser_pane, reload_browser_pane,
+    set_browser_pane_bounds, show_browser_pane, BrowserUrlRegistry,
+};
+use browser_origins::{
+    clear_trusted_browser_origins, get_trusted_browser_origins, revoke_browser_origin,
+    trust_browser_origin, TrustedOriginsStore,
 };
 use resume::{
     clear_all_resume_records, clear_resume_record, get_resume_records,
@@ -36,6 +41,8 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
         .manage(TrustedShellStore::default())
+        .manage(TrustedOriginsStore::default())
+        .manage(BrowserUrlRegistry::default())
         .manage(AutomationBridge::default())
         .manage(AutomationEventStore::default())
         .setup(|app| {
@@ -68,7 +75,12 @@ pub fn run() {
             get_resume_records,
             clear_resume_record,
             clear_all_resume_records,
-            setup_agent_hooks
+            setup_agent_hooks,
+            get_trusted_browser_origins,
+            trust_browser_origin,
+            revoke_browser_origin,
+            clear_trusted_browser_origins,
+            evaluate_browser_pane
         ])
         .run(tauri::generate_context!())
         .expect("error while running TonyMux");
