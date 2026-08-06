@@ -4,6 +4,7 @@ import {
   Database,
   Download,
   Keyboard,
+  Network,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -28,6 +29,7 @@ import {
 import {
   DEFAULT_SETTINGS,
   MAX_CUSTOM_SHELL_PROFILES,
+  MAX_SSH_PROFILES,
   SHELL_PROFILES,
   countCustomShellProfilesUsingExecutable,
   exportSettings,
@@ -37,9 +39,14 @@ import {
   normalizeSettings,
   validateCustomShellExecutable,
   validateSettings,
+  validateSshHost,
+  validateSshIdentityFile,
+  validateSshPort,
+  validateSshUser,
   type AppSettings,
   type CustomShellProfile,
   type CursorStyle,
+  type SshProfile,
 } from "../settings";
 import {
   DEFAULT_SHORTCUT_BINDINGS,
@@ -64,6 +71,7 @@ function cloneSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
     customShellProfiles: settings.customShellProfiles.map((profile) => ({ ...profile })),
+    sshProfiles: settings.sshProfiles.map((profile) => ({ ...profile })),
     terminal: { ...settings.terminal },
     persistence: { ...settings.persistence },
     shortcuts: { ...settings.shortcuts },
@@ -376,6 +384,62 @@ export function SettingsDialog({
     } finally {
       setTrustPendingId(null);
     }
+  };
+
+  const addSshProfile = () => {
+    if (draft.sshProfiles.length >= MAX_SSH_PROFILES) return;
+    const profile: SshProfile = {
+      id: `ssh:${crypto.randomUUID()}`,
+      label: "SSH host",
+      host: "",
+      port: 22,
+      user: "",
+      identityFile: "",
+    };
+    setDraft((current) => ({
+      ...current,
+      defaultShellProfileId: profile.id,
+      sshProfiles: [...current.sshProfiles, profile],
+    }));
+  };
+
+  const updateSshProfile = (
+    profileId: string,
+    key: "label" | "host" | "user" | "identityFile",
+    value: string,
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      sshProfiles: current.sshProfiles.map((profile) =>
+        profile.id === profileId ? { ...profile, [key]: value } : profile,
+      ),
+    }));
+  };
+
+  const updateSshProfilePort = (profileId: string, value: string) => {
+    const port = Number.parseInt(value, 10);
+    setDraft((current) => ({
+      ...current,
+      sshProfiles: current.sshProfiles.map((profile) =>
+        profile.id === profileId
+          ? { ...profile, port: Number.isNaN(port) ? 0 : port }
+          : profile,
+      ),
+    }));
+  };
+
+  const removeSshProfile = (profileId: string) => {
+    const currentDraft = draftRef.current;
+    const nextDraft = {
+      ...currentDraft,
+      defaultShellProfileId:
+        currentDraft.defaultShellProfileId === profileId
+          ? DEFAULT_SETTINGS.defaultShellProfileId
+          : currentDraft.defaultShellProfileId,
+      sshProfiles: currentDraft.sshProfiles.filter((candidate) => candidate.id !== profileId),
+    };
+    setDraft(nextDraft);
+    draftRef.current = nextDraft;
   };
 
   const revokeTrustedExecutable = async (entry: TrustedExecutableSnapshot) => {
@@ -1028,6 +1092,139 @@ export function SettingsDialog({
                   }
                 />
               </label>
+            </div>
+
+            <div className="custom-profile-panel">
+              <div className="custom-profile-panel__heading">
+                <div>
+                  <strong>SSH connections</strong>
+                  <small>
+                    Remote terminal panes spawn the Windows OpenSSH client (ssh.exe) inside a
+                    ConPTY pane. Password prompts, host-key confirmation and interactive shells
+                    work directly in the terminal.
+                  </small>
+                </div>
+                <button
+                  className="settings-button settings-button--quiet settings-button--compact"
+                  type="button"
+                  disabled={draft.sshProfiles.length >= MAX_SSH_PROFILES}
+                  onClick={addSshProfile}
+                >
+                  <Plus size={13} aria-hidden="true" />
+                  Add SSH host
+                </button>
+              </div>
+
+              {draft.sshProfiles.length === 0 ? (
+                <div className="custom-profile-empty">
+                  <Network size={16} aria-hidden="true" />
+                  <span>No SSH connection has been configured.</span>
+                </div>
+              ) : (
+                <div className="custom-profile-list">
+                  {draft.sshProfiles.map((profile) => {
+                    const selected = draft.defaultShellProfileId === profile.id;
+                    const hostError = validateSshHost(profile.host);
+                    const userError = validateSshUser(profile.user);
+                    const portError = validateSshPort(profile.port);
+                    const identityError = validateSshIdentityFile(profile.identityFile);
+                    return (
+                      <fieldset key={profile.id} className="ssh-profile-card">
+                        <legend>
+                          <input
+                            type="radio"
+                            name="default-ssh-profile"
+                            checked={selected}
+                            onChange={() =>
+                              setDraft((current) => ({
+                                ...current,
+                                defaultShellProfileId: profile.id,
+                              }))
+                            }
+                          />
+                          <strong>{profile.label || "SSH host"}</strong>
+                          <span>default</span>
+                        </legend>
+                        <div className="ssh-profile-grid">
+                          <label className="settings-field">
+                            <span>Label</span>
+                            <input
+                              value={profile.label}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateSshProfile(profile.id, "label", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="settings-field">
+                            <span>Host</span>
+                            <input
+                              value={profile.host}
+                              placeholder="example.com"
+                              aria-invalid={hostError !== null}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateSshProfile(profile.id, "host", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="settings-field">
+                            <span>Port</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={65_535}
+                              value={profile.port === 0 ? "" : profile.port}
+                              placeholder="22"
+                              aria-invalid={portError !== null}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateSshProfilePort(profile.id, event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="settings-field">
+                            <span>User</span>
+                            <input
+                              value={profile.user}
+                              placeholder="root"
+                              aria-invalid={userError !== null}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateSshProfile(profile.id, "user", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="settings-field settings-field--wide">
+                            <span>Identity file (optional)</span>
+                            <input
+                              value={profile.identityFile}
+                              placeholder="C:\Users\you\.ssh\id_ed25519"
+                              aria-invalid={identityError !== null}
+                              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                updateSshProfile(profile.id, "identityFile", event.target.value)
+                              }
+                            />
+                          </label>
+                        </div>
+                        {[hostError, userError, portError, identityError].some(Boolean) && (
+                          <p className="custom-profile-error">
+                            {[hostError, userError, portError, identityError]
+                              .filter((error): error is string => Boolean(error))
+                              .join(" ")}
+                          </p>
+                        )}
+                        <div className="custom-profile-actions">
+                          <button
+                            className="settings-button settings-button--danger settings-button--compact"
+                            type="button"
+                            onClick={() => removeSshProfile(profile.id)}
+                          >
+                            <Trash2 size={13} aria-hidden="true" />
+                            Remove
+                          </button>
+                        </div>
+                      </fieldset>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </section>
 

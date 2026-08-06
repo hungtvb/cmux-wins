@@ -35,6 +35,14 @@ Before every custom process spawn, Rust opens the file with write/delete sharing
 
 Settings lists every trust record with `Identity matches`, `File changed`, `File missing` or `Unavailable` state. Users can refresh, revoke one record, clear all records or reset an unreadable/future-version store without editing files manually. Multiple profiles may share one executable path; removing one profile retains trust while another profile still references that path. Removing the final referencing profile asks before revoking trust.
 
+## SSH connections
+
+Settings version 5 also supports at most 12 SSH connection profiles. Each profile has a stable `ssh:*` ID, a bounded label, a host (letters, digits, dots, dashes, underscores, colons — IPv4, IPv6 and hostnames), a port (1–65535, default 22), a user and an optional identity-file path.
+
+An SSH profile spawns the Windows OpenSSH client (`ssh.exe`, shipped with Windows 10+) inside the same ConPTY pane used for local shells: `ssh -p <port> [-i <identity file>] <user>@<host>`. Password prompts, host-key confirmation and interactive remote shells work directly in the terminal. Rust validates the connection again before spawning and bypasses the local-shell trust path because `ssh.exe` is a Windows system binary — no trust record is required.
+
+SSH profiles are selectable as the default shell for new panes. Remote panes keep the local working-directory/startup-command behavior only where meaningful; the remote session is governed by the SSH server's default shell and the profile's identity settings. Credentials are never stored in settings; the profile stores only host, port, user and key path.
+
 ## Session behavior
 
 Settings are snapshotted when a terminal pane is created:

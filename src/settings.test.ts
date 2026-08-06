@@ -16,6 +16,9 @@ import {
   snapshotTerminalSettings,
   validateSettings,
   validateCustomShellExecutable,
+  validateSshHost,
+  validateSshPort,
+  validateSshUser,
 } from "./settings";
 
 describe("settings schema", () => {
@@ -138,6 +141,62 @@ describe("settings schema", () => {
       shellProfileId: "custom:my_shell_01",
       customShellExecutable: "C:\\Tools\\Nushell\\nu.exe",
     });
+  });
+
+  it("normalizes bounded ssh connections and snapshots the selected target", () => {
+    const settings = normalizeSettings({
+      defaultShellProfileId: "ssh:prod_box_01",
+      sshProfiles: [
+        {
+          id: "ssh:prod_box_01",
+          label: "  Prod box  ",
+          host: " db.internal.example.com ",
+          port: 2200,
+          user: "  deploy  ",
+          identityFile: " C:\\Users\\tony\\.ssh\\id_ed25519 ",
+        },
+        { id: "ssh:bad_host_01", label: "Bad", host: "bad host", port: 22, user: "u" },
+        { id: "ssh:bad_user_01", label: "Bad", host: "ok.example.com", port: 22, user: "u@x" },
+        { id: "ssh:bad_port_01", label: "Bad", host: "ok.example.com", port: 0, user: "u" },
+        { id: "ssh:bad_port_02", label: "Bad", host: "ok.example.com", port: 70_000, user: "u" },
+        { id: "ssh:no_user_01", label: "Bad", host: "ok.example.com", port: 22, user: "" },
+        { id: "ssh:no_label_01", label: "  ", host: "ok.example.com", port: 22, user: "u" },
+      ],
+    });
+
+    expect(settings.sshProfiles).toEqual([
+      {
+        id: "ssh:prod_box_01",
+        label: "Prod box",
+        host: "db.internal.example.com",
+        port: 2200,
+        user: "deploy",
+        identityFile: "C:\\Users\\tony\\.ssh\\id_ed25519",
+      },
+    ]);
+    expect(snapshotTerminalSettings(settings)).toMatchObject({
+      shellProfileId: "ssh:prod_box_01",
+    });
+    expect(normalizeTerminalPaneSettings({ shellProfileId: "ssh:prod_box_01" }, settings)).toEqual({
+      shellProfileId: "ssh:prod_box_01",
+      workingDirectory: "",
+      startupCommand: "",
+      appearance: settings.terminal,
+    });
+  });
+
+  it("validates ssh connection fields", () => {
+    expect(validateSshHost("example.com")).toBeNull();
+    expect(validateSshHost("  ")).toMatch(/required/);
+    expect(validateSshHost("bad host")).toMatch(/letters, digits/);
+    expect(validateSshHost("example.com:22")).toBeNull();
+    expect(validateSshUser("root")).toBeNull();
+    expect(validateSshUser("")).toMatch(/required/);
+    expect(validateSshUser("root@x")).toMatch(/letters, digits/);
+    expect(validateSshPort(22)).toBeNull();
+    expect(validateSshPort(0)).toMatch(/1 and 65535/);
+    expect(validateSshPort(70_000)).toMatch(/1 and 65535/);
+    expect(validateSshPort(22.5)).toMatch(/integer/);
   });
 
   it("rejects unsafe custom executable paths and allows shared trusted paths", () => {

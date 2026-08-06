@@ -130,8 +130,63 @@ jobs:
             architecture = "x64"
             runner = $env:RUNNER_IMAGE
             publish = "${{ steps.version.outputs.publish }}" -eq "true"
+            signed = $env:CODE_SIGNING_CERT_BASE64 -ne "" -and $null -ne $env:CODE_SIGNING_CERT_BASE64
             createdAtUtc = [DateTime]::UtcNow.ToString("o")
           } | ConvertTo-Json | Set-Content release-assets/build-metadata.json
+        env:
+          CODE_SIGNING_CERT_BASE64: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
+
+      - name: Sign release assets with Authenticode
+        if: env.CODE_SIGNING_CERT_BASE64 != ''
+        env:
+          CODE_SIGNING_CERT_BASE64: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
+          CODE_SIGNING_CERT_PASSWORD: ${{ secrets.CODE_SIGNING_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sdkRoot = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $sdkRoot) { throw "Windows SDK not found" }
+          $signtool = Join-Path $sdkRoot.FullName "x64\signtool.exe"
+          if (-not (Test-Path $signtool)) { throw "signtool.exe not found under $($sdkRoot.FullName)" }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "tonymux-codesign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:CODE_SIGNING_CERT_BASE64))
+          $password = ConvertTo-SecureString $env:CODE_SIGNING_CERT_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          $cert = Get-PfxCertificate -FilePath $pfxPath
+
+          Get-ChildItem release-assets -File |
+            Where-Object { $_.Extension -in ".exe", ".msi" } |
+            ForEach-Object {
+              Write-Output "Signing $($_.Name)"
+              & $signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /sha1 $cert.Thumbprint $_.FullName
+              if ($LASTEXITCODE -ne 0) { throw "signtool failed for $($_.Name)" }
+            }
+          Remove-Item $pfxPath -Force
+
+      - name: Verify signatures and write checksums, SBOM and release notes
+        env:
+          CODE_SIGNING_CERT_BASE64: ${{ secrets.CODE_SIGNING_CERT_BASE64 }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = "${{ steps.version.outputs.version }}"
+          $signingConfigured = $env:CODE_SIGNING_CERT_BASE64 -ne "" -and $null -ne $env:CODE_SIGNING_CERT_BASE64
+
+          $signable = Get-ChildItem release-assets -File | Where-Object { $_.Extension -in ".exe", ".msi" }
+          if ($signingConfigured) {
+            foreach ($asset in $signable) {
+              $signature = Get-AuthenticodeSignature $asset.FullName
+              if ($signature.Status -ne "Valid") {
+                throw "Authenticode verification failed for $($asset.Name): $($signature.Status) $($signature.StatusMessage)"
+              }
+              Write-Output "Verified $($asset.Name): $($signature.SignerCertificate.Subject)"
+            }
+            $signingNote = "- All installers are Authenticode-signed; SmartScreen reputation builds over time as users run the signed build."
+          } else {
+            $signingNote = "- Installers are not Authenticode-signed yet and may trigger Windows SmartScreen. Configure CODE_SIGNING_CERT_BASE64 + CODE_SIGNING_CERT_PASSWORD secrets to enable signing (see docs/RELEASING.md)."
+          }
 
           Get-ChildItem release-assets -File |
             Sort-Object Name |
@@ -139,6 +194,38 @@ jobs:
               $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
               "$hash  $($_.Name)"
             } | Set-Content release-assets/SHA256SUMS.txt
+
+          # SBOM: resolved Rust dependency graph from cargo metadata, plus
+          # declared frontend dependencies (no lockfile is committed).
+          $metadata = cargo metadata --manifest-path src-tauri/Cargo.toml --format-version 1 | ConvertFrom-Json
+          $components = @($metadata.packages | ForEach-Object {
+            [ordered]@{
+              type = "library"
+              name = $_.name
+              version = $_.version
+              purl = "pkg:cargo/$($_.name.Replace('-','_'))@$($_.version)"
+            }
+          })
+          $packageJson = Get-Content package.json -Raw | ConvertFrom-Json
+          $frontendComponents = @($packageJson.dependencies.PSObject.Properties | ForEach-Object {
+            [ordered]@{
+              type = "library"
+              name = $_.Name
+              version = "$($_.Value) (declared range; no lockfile committed)"
+              purl = "pkg:npm/$($_.Name)"
+            }
+          })
+          $sbom = [ordered]@{
+            bomFormat = "CycloneDX"
+            specVersion = "1.5"
+            version = 1
+            metadata = [ordered]@{
+              component = [ordered]@{ type = "application"; name = "TonyMux"; version = $version }
+              timestamp = [DateTime]::UtcNow.ToString("o")
+            }
+            components = @($components + $frontendComponents)
+          }
+          $sbom | ConvertTo-Json -Depth 6 | Set-Content release-assets/tonymux-$version-sbom.json
 
           $releaseNotes = @'
           # TonyMux v__VERSION__
@@ -150,10 +237,10 @@ jobs:
           - x64 MSI installer
           - x64 NSIS setup executable
           - SHA-256 checksum manifest
+          - CycloneDX SBOM
           - Build metadata
 
-          ## Known limitations
-          - Installers are not Authenticode-signed yet and may trigger Windows SmartScreen.
+          __SIGNING_NOTE__
           - Interactive Windows 11 QA evidence is tracked in issue #2.
           - The legacy `cmux-cli.exe`, named pipe and local automation config path remain available for compatibility during the TonyMux rename.
 
@@ -166,7 +253,10 @@ jobs:
 
           Compare the result with `SHA256SUMS.txt` before extraction or installation.
           '@
-          $renderedNotes = $releaseNotes.Replace("__VERSION__", $version).Replace("__COMMIT__", $env:GITHUB_SHA)
+          $renderedNotes = $releaseNotes
+            .Replace("__VERSION__", $version)
+            .Replace("__COMMIT__", $env:GITHUB_SHA)
+            .Replace("__SIGNING_NOTE__", $signingNote)
           $renderedNotes | Set-Content release-notes.md
 
       - name: Upload immutable workflow artifact

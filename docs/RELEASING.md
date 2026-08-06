@@ -107,6 +107,33 @@ Get-FileHash .\TonyMux.exe -Algorithm SHA256
 
 The workflow updates an existing release and uploads assets with `--clobber`, so a failed release job can be rerun after correcting infrastructure problems. Never move or recreate a published stable tag to point to different source code. Create a patch version instead.
 
-## Current security limitation
+## Code signing and SmartScreen
 
-Until issue #11 is complete, installers are unsigned and Windows SmartScreen may warn. Published releases must state this limitation clearly. Do not describe unsigned builds as production-trusted.
+Issue #11 signing infrastructure is wired into the release workflow and activates the moment signing secrets exist. Until then, installers are unsigned and Windows SmartScreen may warn; published releases must state this clearly and must never describe unsigned builds as production-trusted.
+
+### Choosing a certificate
+
+| Option | Cost | SmartScreen reputation | Notes |
+| --- | --- | --- | --- |
+| OV code-signing cert (e.g. Sectigo, DigiCert) | ~$200–400/year | Good, grows with download volume | Requires organization verification; 1–3 days |
+| EV code-signing cert | ~$300–500/year | Strongest, immediate reputation | Requires hardware token; company docs needed |
+| Azure Trusted Signing | ~$10/month + per-signature | Strong (Microsoft root) | Cloud HSM, no token; integrates via `azure-trusted-signing-action` |
+| Self-signed | Free | None (SmartScreen still warns) | Only for internal testing; never publish as trusted |
+
+### Enabling signing
+
+1. Obtain a certificate and export it as a PFX (for OV/EV) or configure Azure Trusted Signing.
+2. Add repository secrets:
+   - `CODE_SIGNING_CERT_BASE64` — base64-encoded PFX contents
+   - `CODE_SIGNING_CERT_PASSWORD` — PFX password
+3. The next release tag triggers the signing step (signtool, SHA-256, RFC 3161 timestamp via DigiCert) followed by mandatory `Get-AuthenticodeSignature` verification — the job fails if verification fails.
+
+The MSI and NSIS `setup.exe` are signed. The portable ZIP is not re-signed (contained binaries can be signed before zipping in a future hardening pass); its file-level checksums remain the verification path.
+
+### SmartScreen expectations
+
+A new certificate shows "Unknown publisher" for a while. Reputation builds as users run the signed build and submit "More info → Run anyway". EV certificates and high download volume shorten this period. There is no code-side shortcut; treat the first weeks after switching to signing as a reputation ramp.
+
+### Secure auto-update (staged)
+
+A signed, opt-in Tauri updater (signed update manifests, disable-able check) is the remaining part of #11. It is intentionally staged behind real signing: the update manifest is only meaningful when installers are Authenticode-signed. Plan when signing is live: add `tauri-plugin-updater`, publish `latest.json` from the release workflow, and expose a settings toggle. Do not ship an unsigned updater.
