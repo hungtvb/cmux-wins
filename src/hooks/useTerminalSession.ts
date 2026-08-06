@@ -38,6 +38,9 @@ type UseTerminalSessionOptions = {
   onDisconnected?: (message: string) => void;
 };
 
+// Matches OSC 9/99/777 terminal notification escape sequences
+// (e.g. \x1b]9;text\x07) emitted by shells and agent hooks.
+// eslint-disable-next-line no-control-regex
 const notificationPattern = /\x1b\](?:9|99|777);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 const HISTORY_CAPTURE_INTERVAL_MS = 2_000;
 

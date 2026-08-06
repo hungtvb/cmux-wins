@@ -11,6 +11,9 @@ const MIN_SPLIT_RATIO = 28;
 const MAX_SPLIT_RATIO = 72;
 const KEYBOARD_STEP = 4;
 
+// Shared ratio utility used by the grid and by workspace persistence;
+// keeping it in this file avoids a one-function module.
+// eslint-disable-next-line react-refresh/only-export-components
 export function clampSplitRatio(value: number): number {
   return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, Math.round(value * 10) / 10));
 }

@@ -39,6 +39,9 @@ const EVENT_KINDS = new Set<BrowserPaneEventKind>([
 
 function boundedText(value: unknown, maxChars: number): string | undefined {
   if (typeof value !== "string") return undefined;
+  // Strip C0 control characters, DEL, and Unicode directional isolates
+  // before persisting anything derived from a URL.
+  // eslint-disable-next-line no-control-regex
   const normalized = value.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, " ").trim();
   if (!normalized) return undefined;
   return Array.from(normalized).slice(0, maxChars).join("");

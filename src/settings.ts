@@ -156,6 +156,8 @@ export function isBuiltInShellProfileId(value: unknown): value is BuiltInShellPr
 }
 
 export function validateCustomShellExecutable(value: string): string | null {
+  // Reject C0 control characters in executable paths (newlines, NUL, etc.).
+  // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f]/.test(value)) {
     return "Executable path cannot contain control characters.";
   }
@@ -257,6 +259,8 @@ export function validateSshPort(value: number): string | null {
 export function validateSshIdentityFile(value: string): string | null {
   const identityFile = value.trim();
   if (!identityFile) return null;
+  // Reject C0 control characters in identity file paths.
+  // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f]/.test(identityFile)) {
     return "Identity file path cannot contain control characters.";
   }
