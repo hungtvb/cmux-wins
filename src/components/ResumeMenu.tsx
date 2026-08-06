@@ -46,6 +46,7 @@ export function ResumeMenu({ records, notice, onResume, onOpenSettings, defaultO
         className={`toolbar-button toolbar-button--compact${open ? " toolbar-button--active" : ""}`}
         onClick={() => setOpen((value) => !value)}
         aria-label="Resume agent session"
+        aria-haspopup="menu"
         aria-expanded={open}
         title="Resume agent session"
       >

@@ -22,6 +22,7 @@ describe("ResumeMenu", () => {
       <ResumeMenu records={[]} notice={null} onResume={() => undefined} onOpenSettings={() => undefined} />,
     );
     expect(markup).toContain('aria-label="Resume agent session"');
+    expect(markup).toContain('aria-haspopup="menu"');
     expect(markup).toContain("Resume agent session");
   });
 

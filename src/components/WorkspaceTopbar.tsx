@@ -168,6 +168,7 @@ export const WorkspaceTopbar = memo(function WorkspaceTopbar({
               "notifications.toggle",
             )}
             aria-label="Toggle notifications panel"
+            aria-haspopup="dialog"
             aria-expanded={notificationsOpen}
           >
             <Bell size={15} />
