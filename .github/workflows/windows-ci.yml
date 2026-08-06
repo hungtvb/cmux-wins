@@ -2,8 +2,19 @@ name: Windows CI
 
 on:
   push:
-    branches: [main, "feat/**", "chore/**"]
+    branches: [main]
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - ".hermes/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ci-${{ github.event.pull_request.number || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   windows-cross-check:
