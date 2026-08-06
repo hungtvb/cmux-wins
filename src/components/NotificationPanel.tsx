@@ -1,5 +1,5 @@
 import { Bell, BellOff, CheckCheck, Globe2, Terminal, X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { NotificationItem } from "../notificationModel";
 
 type NotificationPanelProps = {
@@ -33,6 +33,13 @@ export function NotificationPanel({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    // Bring keyboard users into the panel without stealing focus from a pane
+    // that was actively being typed into.
+    requestAnimationFrame(() => closeButtonRef.current?.focus());
+  }, []);
+
   return (
     <div className="notification-panel" role="dialog" aria-modal="true" aria-label="Notifications">
       <div className="notification-panel__header">
@@ -44,6 +51,7 @@ export function NotificationPanel({
           )}
         </span>
         <button
+          ref={closeButtonRef}
           type="button"
           className="icon-button"
           onClick={onClose}
