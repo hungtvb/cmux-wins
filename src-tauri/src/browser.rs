@@ -163,7 +163,7 @@ pub(crate) async fn create_browser_pane(
     let title_app = app.clone();
     let title_pane_id = pane_id.clone();
 
-    let builder = WebviewBuilder::new(label, WebviewUrl::External(parsed_url))
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(parsed_url))
         .on_navigation(move |target| {
             let allowed = is_allowed_browser_url(target);
             if !allowed {
