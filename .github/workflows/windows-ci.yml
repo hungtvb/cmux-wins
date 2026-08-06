@@ -8,6 +8,12 @@ on:
       - "docs/**"
       - "**/*.md"
       - ".hermes/**"
+  workflow_dispatch:
+    inputs:
+      build_installers:
+        description: "Build MSI/NSIS installers (slow Windows job; normally built only at release time)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -195,6 +201,10 @@ jobs:
           retention-days: 7
 
   installer:
+    # Slow Windows job (builds MSI/NSIS + smoke-launch). Runs only when
+    # explicitly requested via workflow_dispatch; regular PRs/pushes skip it.
+    # Release artifacts are built by windows-release.yml on tag push.
+    if: github.event_name == 'workflow_dispatch' && inputs.build_installers
     needs: check
     runs-on: windows-latest
     timeout-minutes: 35

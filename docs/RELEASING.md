@@ -5,7 +5,8 @@ Windows releases are created by `.github/workflows/windows-release.yml` from ver
 ## Release prerequisites
 
 - PR changes are merged into `main`.
-- Windows CI passes frontend, Rust, ConPTY and installer jobs.
+- Windows CI passes frontend, Rust and ConPTY jobs.
+- Installer build verified on demand: **Actions → Windows CI → Run workflow → tick "Build MSI/NSIS installers"** (the `installer` job is skipped on regular PRs/pushes and runs only via this manual dispatch to save Windows runner time; release artifacts themselves are built by `windows-release.yml` on tag push).
 - Issue #2 contains current Windows 11 runtime QA evidence.
 - Known defects are linked from the release notes or roadmap issue #12.
 - `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` contain the same version.
