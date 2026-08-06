@@ -201,9 +201,11 @@ fn validate_ssh_connection(connection: SshConnection) -> Result<SshConnection, S
 
 fn build_ssh_command(connection: &SshConnection) -> CommandBuilder {
     let mut command = CommandBuilder::new("ssh.exe");
-    command.arg("-p").arg(connection.port.to_string());
+    command.arg("-p");
+    command.arg(connection.port.to_string());
     if let Some(identity_file) = connection.identity_file.as_deref() {
-        command.arg("-i").arg(identity_file);
+        command.arg("-i");
+        command.arg(identity_file);
     }
     command.arg(format!("{}@{}", connection.user, connection.host));
     command
