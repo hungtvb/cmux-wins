@@ -32,6 +32,14 @@ struct TerminalOutputEvent {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct TerminalLifecycleEvent {
+    session_id: String,
+    kind: String,
+    message: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct SpawnTerminalResult {
     generation: u64,
     process_id: Option<u32>,
@@ -309,10 +317,31 @@ fn emit_output(app: &AppHandle, session_id: &str, data: impl Into<String>) {
     );
 }
 
+/// Surface a terminal lifecycle change (exit / error) to the UI so SSH panes
+/// (and any remote shell) can show a disconnected state and offer to reconnect.
+fn emit_terminal_lifecycle(app: &AppHandle, session_id: &str, kind: &str, payload: Value) {
+    let _ = app.emit("terminal-lifecycle", TerminalLifecycleEvent {
+        session_id: session_id.to_owned(),
+        kind: kind.to_owned(),
+        message: payload.get("error").and_then(Value::as_str).unwrap_or(""),
+    });
+}
+
 fn publish_terminal_event(app: &AppHandle, kind: &str, payload: Value) {
     let store = app.state::<AutomationEventStore>();
     if let Err(error) = store.publish(kind, payload) {
         eprintln!("[TonyMux automation] unable to publish {kind}: {error}");
+    }
+}
+
+/// Map a terminal exit code to a user-facing lifecycle hint. ssh.exe uses
+/// 255 for connection/host-key/auth failures and 1 for remote command errors;
+/// everything else is a generic message.
+fn terminal_exit_message(exit_code: Option<i32>) -> &'static str {
+    match exit_code {
+        Some(255) => "SSH connection failed (host key, authentication or network). Reconnect to retry.",
+        Some(1) => "Remote command exited with an error.",
+        _ => "Terminal session ended.",
     }
 }
 
@@ -559,6 +588,10 @@ pub(crate) fn spawn_terminal(
                         "exitCode": exit_code,
                     }),
                 );
+                // ssh.exe exit codes: 255 = connection/host-key/auth failure,
+                // 1 = remote command error. Surface a hint for the SSH case.
+                let exit_message = terminal_exit_message(exit_code);
+                emit_terminal_lifecycle(&app, &session_id, "exited", json!({ "error": exit_message }));
             }
             Err(error) => {
                 let message = format!("unable to wait for terminal process: {error}");
@@ -579,6 +612,7 @@ pub(crate) fn spawn_terminal(
                         "error": message,
                     }),
                 );
+                emit_terminal_lifecycle(&app, &session_id, "error", json!({ "error": message }));
             }
         }
     });
@@ -859,5 +893,13 @@ mod tests {
             identity_file: None,
         })
         .is_err());
+    }
+
+    #[test]
+    fn terminal_exit_messages_cover_ssh_failure_codes() {
+        assert!(terminal_exit_message(Some(255)).contains("SSH connection failed"));
+        assert!(terminal_exit_message(Some(1)).contains("Remote command exited"));
+        assert_eq!(terminal_exit_message(None), "Terminal session ended.");
+        assert_eq!(terminal_exit_message(Some(0)), "Terminal session ended.");
     }
 }
