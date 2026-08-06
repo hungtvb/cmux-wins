@@ -206,6 +206,63 @@
   gap: 9px;
 }
 
+.ssh-profile-card {
+  display: grid;
+  gap: 11px;
+  min-width: 0;
+  margin: 0;
+  padding: 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.ssh-profile-card legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.ssh-profile-card legend input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--tm-brand);
+}
+
+.ssh-profile-card legend span {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 500;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.ssh-profile-card:has(legend input:checked) legend span {
+  opacity: 1;
+}
+
+.ssh-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 9px;
+}
+
+.custom-profile-error {
+  margin: 0;
+  color: var(--danger, #ff8080);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.custom-profile-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .custom-profile {
   display: grid;
   gap: 11px;

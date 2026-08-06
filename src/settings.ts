@@ -51,6 +51,13 @@ export const MAX_CUSTOM_SHELL_LABEL_LENGTH = 64;
 export const MAX_CUSTOM_SHELL_EXECUTABLE_LENGTH = 1_024;
 export const CUSTOM_SHELL_PROFILE_ID_PATTERN = /^custom:[A-Za-z0-9_-]{8,80}$/;
 
+export const MAX_SSH_PROFILES = 12;
+export const MAX_SSH_LABEL_LENGTH = 64;
+export const SSH_PROFILE_ID_PATTERN = /^ssh:[A-Za-z0-9_-]{8,80}$/;
+export const SSH_HOST_PATTERN = /^[A-Za-z0-9._:-]{1,253}$/;
+export const SSH_USER_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+export const MAX_SSH_IDENTITY_FILE_LENGTH = 1_024;
+
 export type BuiltInShellProfileId = (typeof SHELL_PROFILES)[number]["id"];
 export type ShellProfileId = string;
 export type CursorStyle = "block" | "underline" | "bar";
@@ -59,6 +66,15 @@ export type CustomShellProfile = {
   id: string;
   label: string;
   executable: string;
+};
+
+export type SshProfile = {
+  id: string;
+  label: string;
+  host: string;
+  port: number;
+  user: string;
+  identityFile: string;
 };
 
 export type TerminalAppearance = {
@@ -79,6 +95,7 @@ export type AppSettings = {
   version: typeof SETTINGS_VERSION;
   defaultShellProfileId: ShellProfileId;
   customShellProfiles: CustomShellProfile[];
+  sshProfiles: SshProfile[];
   defaultWorkingDirectory: string;
   startupCommand: string;
   terminal: TerminalAppearance;
@@ -98,6 +115,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   version: SETTINGS_VERSION,
   defaultShellProfileId: "windows-powershell",
   customShellProfiles: [],
+  sshProfiles: [],
   defaultWorkingDirectory: "",
   startupCommand: "",
   terminal: {
@@ -211,6 +229,97 @@ function normalizeCustomShellProfiles(value: unknown): CustomShellProfile[] {
   return profiles;
 }
 
+export function validateSshHost(value: string): string | null {
+  const host = value.trim();
+  if (!host) return "Host is required.";
+  if (!SSH_HOST_PATTERN.test(host)) {
+    return "Host can only contain letters, digits, dots, dashes, underscores or colons.";
+  }
+  return null;
+}
+
+export function validateSshUser(value: string): string | null {
+  const user = value.trim();
+  if (!user) return "User is required.";
+  if (!SSH_USER_PATTERN.test(user)) {
+    return "User can only contain letters, digits, dots, dashes or underscores.";
+  }
+  return null;
+}
+
+export function validateSshPort(value: number): string | null {
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
+    return "Port must be an integer between 1 and 65535.";
+  }
+  return null;
+}
+
+export function validateSshIdentityFile(value: string): string | null {
+  const identityFile = value.trim();
+  if (!identityFile) return null;
+  if (/[\x00-\x1f]/.test(identityFile)) {
+    return "Identity file path cannot contain control characters.";
+  }
+  if (identityFile.length > MAX_SSH_IDENTITY_FILE_LENGTH) {
+    return `Identity file path must be at most ${MAX_SSH_IDENTITY_FILE_LENGTH} characters.`;
+  }
+  return null;
+}
+
+export function normalizeSshIdentityFile(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value.trim().slice(0, MAX_SSH_IDENTITY_FILE_LENGTH);
+}
+
+function normalizeSshProfiles(value: unknown): SshProfile[] {
+  if (!Array.isArray(value)) return [];
+
+  const profiles: SshProfile[] = [];
+  const usedIds = new Set<string>();
+
+  for (const candidateValue of value.slice(0, MAX_SSH_PROFILES)) {
+    if (!candidateValue || typeof candidateValue !== "object") continue;
+    const candidate = candidateValue as Record<string, unknown>;
+    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    const label = safeString(candidate.label, "", MAX_SSH_LABEL_LENGTH).trim();
+    const host = typeof candidate.host === "string" ? candidate.host.trim() : "";
+    const port =
+      typeof candidate.port === "number" && Number.isInteger(candidate.port)
+        ? candidate.port
+        : 22;
+    const user = typeof candidate.user === "string" ? candidate.user.trim() : "";
+    const identityFile = normalizeSshIdentityFile(candidate.identityFile);
+
+    if (
+      !SSH_PROFILE_ID_PATTERN.test(id) ||
+      !label ||
+      validateSshHost(host) ||
+      validateSshPort(port) ||
+      validateSshUser(user) ||
+      validateSshIdentityFile(identityFile) ||
+      usedIds.has(id)
+    ) {
+      continue;
+    }
+
+    usedIds.add(id);
+    profiles.push({ id, label, host, port, user, identityFile });
+  }
+
+  return profiles;
+}
+
+export function findSshProfile(
+  settings: Pick<AppSettings, "sshProfiles">,
+  profileId: string,
+): SshProfile | undefined {
+  return settings.sshProfiles.find((profile) => profile.id === profileId);
+}
+
+export function isSshProfileId(profileId: string): boolean {
+  return SSH_PROFILE_ID_PATTERN.test(profileId);
+}
+
 export function findCustomShellProfile(
   settings: Pick<AppSettings, "customShellProfiles">,
   profileId: string,
@@ -280,10 +389,13 @@ export function normalizeSettings(value: unknown): AppSettings {
 
   const customShellProfiles = normalizeCustomShellProfiles(candidate.customShellProfiles);
   const customProfileIds = new Set(customShellProfiles.map((profile) => profile.id));
+  const sshProfiles = normalizeSshProfiles(candidate.sshProfiles);
+  const sshProfileIds = new Set(sshProfiles.map((profile) => profile.id));
   const rawProfile = candidate.defaultShellProfileId ?? candidate.shellProfileId;
   const defaultShellProfileId =
     isBuiltInShellProfileId(rawProfile) ||
-    (typeof rawProfile === "string" && customProfileIds.has(rawProfile))
+    (typeof rawProfile === "string" && customProfileIds.has(rawProfile)) ||
+    (typeof rawProfile === "string" && sshProfileIds.has(rawProfile))
       ? rawProfile
       : DEFAULT_SETTINGS.defaultShellProfileId;
 
@@ -299,6 +411,7 @@ export function normalizeSettings(value: unknown): AppSettings {
     version: SETTINGS_VERSION,
     defaultShellProfileId,
     customShellProfiles,
+    sshProfiles,
     defaultWorkingDirectory: safeString(rawWorkingDirectory, "", 1_024).trim(),
     startupCommand: safeString(candidate.startupCommand, "", 4_096).trim(),
     terminal: normalizeTerminalAppearance(candidate.terminal),
@@ -329,6 +442,12 @@ export function normalizeTerminalPaneSettings(
   let customShellExecutable = fallbackSnapshot.customShellExecutable;
 
   if (isBuiltInShellProfileId(candidate.shellProfileId)) {
+    shellProfileId = candidate.shellProfileId;
+    customShellExecutable = undefined;
+  } else if (
+    typeof candidate.shellProfileId === "string" &&
+    SSH_PROFILE_ID_PATTERN.test(candidate.shellProfileId)
+  ) {
     shellProfileId = candidate.shellProfileId;
     customShellExecutable = undefined;
   } else if (

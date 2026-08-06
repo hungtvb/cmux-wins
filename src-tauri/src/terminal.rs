@@ -141,6 +141,74 @@ fn is_custom_profile_id(profile_id: &str) -> bool {
             .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'_' | b'-'))
 }
 
+/// A validated SSH connection target for remote terminal panes.
+///
+/// `ssh.exe` ships with Windows 10+ (OpenSSH client) and is spawned through
+/// the same ConPTY path as local shells, so password prompts, host-key
+/// confirmation and interactive remote shells all work in the pane.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub(crate) struct SshConnection {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    #[serde(default)]
+    pub identity_file: Option<String>,
+}
+
+fn validate_ssh_connection(connection: SshConnection) -> Result<SshConnection, String> {
+    let host = connection.host.trim().to_owned();
+    if host.is_empty() || host.len() > 253 {
+        return Err("ssh host must be 1 to 253 characters".to_owned());
+    }
+    if !host.bytes().all(|value| {
+        value.is_ascii_alphanumeric() || matches!(value, b'.' | b'-' | b'_' | b':')
+    }) {
+        return Err("ssh host contains unsupported characters".to_owned());
+    }
+    if connection.port == 0 {
+        return Err("ssh port must be between 1 and 65535".to_owned());
+    }
+    let user = connection.user.trim().to_owned();
+    if user.is_empty() || user.len() > 128 {
+        return Err("ssh user must be 1 to 128 characters".to_owned());
+    }
+    if !user
+        .bytes()
+        .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'.' | b'-' | b'_'))
+    {
+        return Err("ssh user contains unsupported characters".to_owned());
+    }
+    let identity_file = match connection.identity_file {
+        Some(value) => {
+            let value = value.trim().to_owned();
+            if value.is_empty() {
+                None
+            } else if value.len() > 1024 {
+                return Err("ssh identity file path exceeds 1024 characters".to_owned());
+            } else {
+                Some(value)
+            }
+        }
+        None => None,
+    };
+    Ok(SshConnection {
+        host,
+        port: connection.port,
+        user,
+        identity_file,
+    })
+}
+
+fn build_ssh_command(connection: &SshConnection) -> CommandBuilder {
+    let mut command = CommandBuilder::new("ssh.exe");
+    command.arg("-p").arg(connection.port.to_string());
+    if let Some(identity_file) = connection.identity_file.as_deref() {
+        command.arg("-i").arg(identity_file);
+    }
+    command.arg(format!("{}@{}", connection.user, connection.host));
+    command
+}
+
 struct ResolvedShell {
     executable: String,
     _trust_guard: Option<TrustedExecutableGuard>,
@@ -258,6 +326,7 @@ pub(crate) fn spawn_terminal(
     custom_shell_executable: Option<String>,
     startup_command: Option<String>,
     client_id: String,
+    ssh: Option<SshConnection>,
     cols: u16,
     rows: u16,
 ) -> Result<SpawnTerminalResult, String> {
@@ -278,12 +347,23 @@ pub(crate) fn spawn_terminal(
         });
     }
 
-    let mut resolved_shell = resolve_shell(
-        &shell_profile_id,
-        custom_shell_executable,
-        trusted_shells.inner(),
-    )?;
-    let shell = resolved_shell.executable.clone();
+    // SSH panes bypass the local shell trust path entirely: ssh.exe is a
+    // Windows system binary and the connection target is validated below.
+    let ssh = ssh.map(validate_ssh_connection).transpose()?;
+    let mut resolved_shell = None;
+    let shell = match &ssh {
+        Some(_) => "ssh.exe".to_owned(),
+        None => {
+            let resolved = resolve_shell(
+                &shell_profile_id,
+                custom_shell_executable,
+                trusted_shells.inner(),
+            )?;
+            let executable = resolved.executable.clone();
+            resolved_shell = Some(resolved);
+            executable
+        }
+    };
     let startup_command = validate_startup_command(startup_command)?;
 
     let pty_system = native_pty_system();
@@ -296,7 +376,11 @@ pub(crate) fn spawn_terminal(
         })
         .map_err(|error| format!("unable to open ConPTY: {error}"))?;
 
-    let mut command = CommandBuilder::new(&shell);
+    let mut command = if let Some(connection) = &ssh {
+        build_ssh_command(connection)
+    } else {
+        CommandBuilder::new(&shell)
+    };
     let shell_name = shell.to_ascii_lowercase();
     if shell_name.contains("powershell") || shell_name.contains("pwsh") {
         command.arg("-NoLogo");
@@ -310,7 +394,10 @@ pub(crate) fn spawn_terminal(
         .slave
         .spawn_command(command)
         .map_err(|error| format!("unable to spawn shell '{shell}': {error}"))?;
-    if let Some(guard) = resolved_shell._trust_guard.as_mut() {
+    if let Some(guard) = resolved_shell
+        .as_mut()
+        .and_then(|resolved| resolved._trust_guard.as_mut())
+    {
         if let Err(error) = guard.verify_unchanged() {
             let _ = child.kill();
             return Err(error);
@@ -714,5 +801,61 @@ mod tests {
         assert!(validate_terminal_client_id("".to_owned()).is_err());
         assert!(validate_terminal_client_id("terminal/client".to_owned()).is_err());
         assert!(validate_terminal_client_id("x".repeat(MAX_TERMINAL_CLIENT_ID_LENGTH + 1)).is_err());
+    }
+
+    #[test]
+    fn ssh_connections_are_validated_and_normalized() {
+        let valid = validate_ssh_connection(SshConnection {
+            host: "  example.com  ".to_owned(),
+            port: 2222,
+            user: "tony".to_owned(),
+            identity_file: Some(" C:\\Users\\tony\\.ssh\\id_ed25519 ".to_owned()),
+        })
+        .expect("valid ssh connection should resolve");
+        assert_eq!(valid.host, "example.com");
+        assert_eq!(valid.port, 2222);
+        assert_eq!(valid.user, "tony");
+        assert_eq!(
+            valid.identity_file.as_deref(),
+            Some("C:\\Users\\tony\\.ssh\\id_ed25519")
+        );
+
+        let bare = validate_ssh_connection(SshConnection {
+            host: "10.0.0.7".to_owned(),
+            port: 22,
+            user: "root".to_owned(),
+            identity_file: None,
+        })
+        .expect("bare connection should resolve");
+        assert_eq!(bare.identity_file, None);
+
+        assert!(validate_ssh_connection(SshConnection {
+            host: "bad host".to_owned(),
+            port: 22,
+            user: "tony".to_owned(),
+            identity_file: None,
+        })
+        .is_err());
+        assert!(validate_ssh_connection(SshConnection {
+            host: "example.com".to_owned(),
+            port: 0,
+            user: "tony".to_owned(),
+            identity_file: None,
+        })
+        .is_err());
+        assert!(validate_ssh_connection(SshConnection {
+            host: "example.com".to_owned(),
+            port: 22,
+            user: "bad@user".to_owned(),
+            identity_file: None,
+        })
+        .is_err());
+        assert!(validate_ssh_connection(SshConnection {
+            host: "".to_owned(),
+            port: 22,
+            user: "tony".to_owned(),
+            identity_file: None,
+        })
+        .is_err());
     }
 }

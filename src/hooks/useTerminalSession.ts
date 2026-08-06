@@ -4,6 +4,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import {
+  findSshProfile,
+  isSshProfileId,
   loadSettings,
   normalizeTerminalPaneSettings,
   snapshotTerminalSettings,
@@ -31,6 +33,25 @@ type UseTerminalSessionOptions = {
 
 const notificationPattern = /\x1b\](?:9|99|777);([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
 const HISTORY_CAPTURE_INTERVAL_MS = 2_000;
+
+type SshConnectionPayload = {
+  host: string;
+  port: number;
+  user: string;
+  identityFile: string | null;
+};
+
+function resolveSshConnection(paneSettings: TerminalPaneSettings): SshConnectionPayload | null {
+  if (!isSshProfileId(paneSettings.shellProfileId)) return null;
+  const profile = findSshProfile(loadSettings(), paneSettings.shellProfileId);
+  if (!profile) return null;
+  return {
+    host: profile.host,
+    port: profile.port,
+    user: profile.user,
+    identityFile: profile.identityFile || null,
+  };
+}
 
 function readTerminalBuffer(terminal: Terminal): string {
   // The normal buffer owns scrollback. Reading it directly prevents a temporary
@@ -216,6 +237,7 @@ export function useTerminalSession({
         customShellExecutable: paneSettings.customShellExecutable || null,
         startupCommand: paneSettings.startupCommand || null,
         clientId,
+        ssh: resolveSshConnection(paneSettings),
         cols: terminal.cols,
         rows: terminal.rows,
       });
