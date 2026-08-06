@@ -489,6 +489,20 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
     [settings.shortcuts],
   );
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((open) => !open);
+  }, []);
+  const openCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(true);
+  }, []);
+  const toggleNotifications = useCallback(() => {
+    setNotificationsOpen((open) => !open);
+  }, []);
+  const closeActiveWorkspace = useCallback(() => {
+    if (!activeWorkspace) return;
+    closeWorkspace(activeWorkspace.id);
+  }, [activeWorkspace, closeWorkspace]);
+
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(() => {
     const workspaceItems: CommandPaletteItem[] = workspaces.map((workspace, index) => {
       const actionId = getWorkspaceShortcutActionId(index);
@@ -695,15 +709,15 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
           resumeRecords={workspaceResumeRecords}
           resumeNotice={resumeNotice}
           onResume={resumeAgentSession}
-          onToggleSidebar={() => setSidebarOpen((open) => !open)}
-          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+          onToggleSidebar={toggleSidebar}
+          onOpenCommandPalette={openCommandPalette}
           onOpenSettings={requestOpenSettings}
           shortcutLabel={shortcutLabel}
           onAddWorkspace={addWorkspace}
           onSplitTerminal={splitTerminalPane}
           onAddBrowser={addBrowserPane}
-          onToggleNotifications={() => setNotificationsOpen((open) => !open)}
-          onCloseWorkspace={() => closeWorkspace(activeWorkspace.id)}
+          onToggleNotifications={toggleNotifications}
+          onCloseWorkspace={closeActiveWorkspace}
         />
 
         {notificationsOpen && (

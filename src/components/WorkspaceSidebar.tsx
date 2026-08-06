@@ -7,6 +7,7 @@ import {
   SquareTerminal,
   X,
 } from "lucide-react";
+import { memo } from "react";
 import type { Workspace, WorkspaceMetadata } from "../types";
 
 type WorkspaceSidebarProps = {
@@ -28,7 +29,7 @@ function workspaceBranch(metadata?: WorkspaceMetadata): string | null {
   return metadata.branch || "detached HEAD";
 }
 
-export function WorkspaceSidebar({
+export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   workspaces,
   metadataByWorkspace,
   activeWorkspaceId,
@@ -154,4 +155,4 @@ export function WorkspaceSidebar({
       </div>
     </aside>
   );
-}
+});

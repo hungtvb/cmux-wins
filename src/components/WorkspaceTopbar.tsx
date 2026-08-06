@@ -13,7 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { MouseEvent } from "react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { ResumeMenu } from "./ResumeMenu";
 import type { ResumeRecord } from "../resumeModel";
 import type { ShortcutActionId } from "../shortcuts";
@@ -59,7 +59,7 @@ function ThemeToggleButton() {
   );
 }
 
-export function WorkspaceTopbar({
+export const WorkspaceTopbar = memo(function WorkspaceTopbar({
   workspace,
   metadata,
   sidebarOpen,
@@ -240,4 +240,4 @@ export function WorkspaceTopbar({
       </div>
     </header>
   );
-}
+});
