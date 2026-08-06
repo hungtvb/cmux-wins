@@ -217,6 +217,7 @@ fn validate_ssh_connection(connection: SshConnection) -> Result<SshConnection, S
         None => None,
     };
     Ok(SshConnection {
+        profile_id,
         host,
         port: connection.port,
         user,
