@@ -1,0 +1,197 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-release.yml"
+      - "package.json"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/tauri.conf.json"
+      - "src-tauri/icons/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require tag commit on main
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $branches = git branch -r --contains $env:GITHUB_SHA
+          if ($branches -notmatch "origin/main") {
+            throw "Release tag must point to a commit contained in origin/main. Found: $branches"
+          }
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Validate release versions
+        id: version
+        shell: pwsh
+        run: |
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargoMetadata = cargo metadata --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
+          $cargoVersion = $cargoMetadata.packages[0].version
+          $versions = @($packageVersion, $tauriVersion, $cargoVersion) | Select-Object -Unique
+
+          if ($versions.Count -ne 1) {
+            throw "Version mismatch. package=$packageVersion tauri=$tauriVersion cargo=$cargoVersion"
+          }
+
+          $isTag = $env:GITHUB_REF -like "refs/tags/v*"
+          if ($isTag) {
+            $tag = $env:GITHUB_REF_NAME
+            $tagVersion = $tag -replace '^v', ''
+            if ($tagVersion -ne $packageVersion) {
+              throw "Tag/config version mismatch. tag=$tagVersion package=$packageVersion"
+            }
+            $publish = "true"
+          } else {
+            $tag = "dry-run-v$packageVersion"
+            $publish = "false"
+          }
+
+          "version=$packageVersion" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "publish=$publish" >> $env:GITHUB_OUTPUT
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Run Windows ConPTY tests
+        timeout-minutes: 12
+        run: cargo test --manifest-path src-tauri/Cargo.toml --test conpty_smoke -- --nocapture --test-threads=1
+
+      - name: Build MSI and NSIS installers
+        run: npm run tauri build
+
+      - name: Prepare versioned release assets
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          New-Item -ItemType Directory -Path release-assets -Force | Out-Null
+
+          $msi = Get-ChildItem src-tauri/target/release/bundle/msi/*.msi | Select-Object -First 1
+          $nsis = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          if (-not $msi -or -not $nsis) {
+            throw "Expected both MSI and NSIS installers"
+          }
+
+          Copy-Item $msi.FullName "release-assets/cmux-windows-$version-x64.msi"
+          Copy-Item $nsis.FullName "release-assets/cmux-windows-$version-x64-setup.exe"
+
+          [ordered]@{
+            version = $version
+            tag = "${{ steps.version.outputs.tag }}"
+            commit = $env:GITHUB_SHA
+            architecture = "x64"
+            runner = $env:RUNNER_IMAGE
+            publish = "${{ steps.version.outputs.publish }}" -eq "true"
+            createdAtUtc = [DateTime]::UtcNow.ToString("o")
+          } | ConvertTo-Json | Set-Content release-assets/build-metadata.json
+
+          Get-ChildItem release-assets -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$hash  $($_.Name)"
+            } | Set-Content release-assets/SHA256SUMS.txt
+
+          $releaseNotes = @'
+          # cmux Windows v__VERSION__
+
+          Automated Windows build produced from commit `__COMMIT__`.
+
+          ## Assets
+          - x64 MSI installer
+          - x64 NSIS setup executable
+          - SHA-256 checksum manifest
+          - Build metadata
+
+          ## Known limitations
+          - Installers are not Authenticode-signed yet and may trigger Windows SmartScreen.
+          - Interactive Windows 11 QA evidence is tracked in issue #2.
+          - Browser panes, Git/PR metadata, SSH, session restore and the local automation API remain on roadmap issue #12.
+
+          ## Verify an installer
+
+          ```powershell
+          Get-FileHash .\cmux-windows-__VERSION__-x64-setup.exe -Algorithm SHA256
+          ```
+
+          Compare the result with `SHA256SUMS.txt` before installation.
+          '@
+          $renderedNotes = $releaseNotes.Replace("__VERSION__", $version).Replace("__COMMIT__", $env:GITHUB_SHA)
+          $renderedNotes | Set-Content release-notes.md
+
+      - name: Upload immutable workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmux-windows-${{ steps.version.outputs.version }}-x64-${{ steps.version.outputs.publish == 'true' && 'release' || 'dry-run' }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create or update GitHub Release
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $title = "cmux Windows $tag"
+          $assets = Get-ChildItem release-assets -File | ForEach-Object { $_.FullName }
+          $isPrerelease = $tag -match '-(alpha|beta|rc)(\.|$)'
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $title --notes-file release-notes.md
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            gh release upload $tag $assets --clobber
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            $arguments = @(
+              "release", "create", $tag,
+              "--title", $title,
+              "--notes-file", "release-notes.md"
+            )
+            if ($isPrerelease) {
+              $arguments += "--prerelease"
+            }
+            $arguments += $assets
+            & gh @arguments
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }

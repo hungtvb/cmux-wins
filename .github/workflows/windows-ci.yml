@@ -1,0 +1,122 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main, feat/windows-mvp]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Type-check and build frontend
+        run: npm run build
+
+      - name: Check Rust backend
+        id: cargo-check
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          cmd /c "cargo check --manifest-path src-tauri/Cargo.toml > cargo-check.log 2>&1"
+          $exitCode = $LASTEXITCODE
+          Get-Content cargo-check.log
+          exit $exitCode
+
+      - name: Upload Rust check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-check-log
+          path: cargo-check.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Fail when Rust check failed
+        if: steps.cargo-check.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
+
+      - name: Run ConPTY smoke tests
+        id: cargo-test
+        continue-on-error: true
+        timeout-minutes: 12
+        shell: pwsh
+        run: |
+          cmd /c "cargo test --manifest-path src-tauri/Cargo.toml --test conpty_smoke -- --nocapture --test-threads=1 > cargo-test.log 2>&1"
+          $exitCode = $LASTEXITCODE
+          Get-Content cargo-test.log
+          exit $exitCode
+
+      - name: Upload ConPTY smoke test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conpty-smoke-test-log
+          path: cargo-test.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail when ConPTY smoke tests failed
+        if: steps.cargo-test.outcome == 'failure'
+        shell: pwsh
+        run: exit 1
+
+  installer:
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build MSI and NSIS installers
+        run: npm run tauri build
+
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmux-windows-installers
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 7

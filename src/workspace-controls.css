@@ -1,0 +1,45 @@
+.workspace-item-row {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.workspace-item-row .workspace-item {
+  padding-right: 34px;
+}
+
+.workspace-item__close {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #687181;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.workspace-item-row:hover .workspace-item__close,
+.workspace-item__close:focus-visible {
+  opacity: 1;
+}
+
+.workspace-item__close:hover {
+  border-color: #4a2a31;
+  background: #2b171d;
+  color: #ff91a5;
+}
+
+.toolbar-button--danger:hover {
+  border-color: #5b3038;
+  background: #2c181d;
+  color: #ff9bac;
+}
