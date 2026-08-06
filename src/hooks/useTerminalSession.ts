@@ -13,6 +13,12 @@ import {
 } from "../settings";
 import { sanitizeTerminalHistory } from "../terminalHistory";
 import {
+  getCurrentTheme,
+  getXtermTheme,
+  THEME_CHANGE_EVENT,
+  type Theme,
+} from "../theme";
+import {
   createTerminalClientId,
   terminalSessionLeases,
 } from "../terminalSessionLease";
@@ -129,28 +135,7 @@ export function useTerminalSession({
       fontSize: paneSettings.appearance.fontSize,
       lineHeight: paneSettings.appearance.lineHeight,
       scrollback: paneSettings.appearance.scrollback,
-      theme: {
-        background: "#0c0c0b",
-        foreground: "#c6c6c1",
-        cursor: "#d4ff40",
-        selectionBackground: "#3a4216",
-        black: "#10100f",
-        brightBlack: "#73736e",
-        red: "#ff9aa8",
-        brightRed: "#ffc2cb",
-        green: "#86d9a5",
-        brightGreen: "#a9e8be",
-        yellow: "#f1bd72",
-        brightYellow: "#f8d59b",
-        blue: "#7aa7ff",
-        brightBlue: "#a7c4ff",
-        magenta: "#c5a8ff",
-        brightMagenta: "#dccaff",
-        cyan: "#78d4d4",
-        brightCyan: "#a4e6e6",
-        white: "#d4d4d0",
-        brightWhite: "#f5f5f4",
-      },
+      theme: getXtermTheme(getCurrentTheme()),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -280,6 +265,12 @@ export function useTerminalSession({
     const focusTerminal = () => terminal.focus();
     host.addEventListener("pointerdown", focusTerminal);
 
+    const onThemeChange = (event: Event) => {
+      const theme = (event as CustomEvent<Theme>).detail;
+      terminal.options.theme = getXtermTheme(theme);
+    };
+    window.addEventListener(THEME_CHANGE_EVENT, onThemeChange);
+
     const resizeObserver = new ResizeObserver(() => {
       fitAddon.fit();
       if (!started) return;
@@ -301,6 +292,7 @@ export function useTerminalSession({
       titleDisposable.dispose();
       writeParsedDisposable.dispose();
       host.removeEventListener("pointerdown", focusTerminal);
+      window.removeEventListener(THEME_CHANGE_EVENT, onThemeChange);
       unlisten?.();
       if (terminalRef.current === terminal) terminalRef.current = null;
       terminal.dispose();

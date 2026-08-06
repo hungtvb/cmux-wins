@@ -1,9 +1,9 @@
 # TonyMux Design System — Tony Workspace
 
 > **Status:** Active product baseline
-> **Version:** 2.0
+> **Version:** 3.0
 > **Primary mode:** Workspace
-> **Shared foundation:** `tony-design-system` 1.0
+> **Shared foundation:** `tony-design-system` 1.1 (SF-inspired adaptive light/dark)
 
 This document is the product-specific source of truth for TonyMux UI design, review, and implementation. Shared Tony foundations define the visual DNA; this file defines how those foundations apply to a Windows desktop terminal workspace.
 
@@ -38,22 +38,22 @@ TonyMux uses the shared Tony **Workspace** mode:
 
 ## Direction: Tony Workspace
 
-Tony Workspace is dark-primary, warm-neutral, precise, and low-distraction. It keeps the useful structure of the original Quiet Operator direction while replacing its cool blue product identity with the shared Tony foundation.
+Tony Workspace is adaptive light/dark with cool-neutral chrome (SF-inspired), precise, and low-distraction. It keeps the useful structure of the original Quiet Operator direction while replacing its cool blue product identity with the shared Tony foundation and adding a first-class light theme.
 
 Use:
 
-- warm neutral surfaces;
-- Tony Lime as a controlled brand and high-importance selection signal;
+- cool neutral surfaces (Apple-style grays; warm browns are removed);
+- Tony Lime as a controlled brand and high-importance selection signal, with a darker light-mode variant for contrast;
 - blue only for keyboard focus and informational states;
 - semantic green, amber, and red for health, caution, and failure;
-- border-led flat surfaces;
+- border-led flat surfaces with subtle glass (backdrop blur) reserved for navigation chrome — sidebar, topbar, status bar;
 - explicit text or icons alongside status colors;
-- terminal and browser content as the visual center.
+- terminal and browser content as the visual center, always opaque.
 
 Avoid:
 
 - cyberpunk neon and decorative glow;
-- glass across primary surfaces;
+- glass across terminal or browser content panes (content must stay opaque and crisp);
 - dashboard card grids and decorative charts;
 - large gradients;
 - all-monospace UI;
@@ -79,45 +79,88 @@ Reusable components consume semantic tokens instead of raw colors.
 :root {
   color-scheme: dark;
 
-  --tm-canvas: #10100f;
-  --tm-surface-0: #151513;
-  --tm-surface-1: #191917;
-  --tm-surface-2: #222220;
-  --tm-surface-3: #282825;
-  --tm-hover: #2d2d2a;
+  --tm-canvas: #1d1d1f;
+  --tm-surface-0: #232325;
+  --tm-surface-1: #2c2c2e;
+  --tm-surface-2: #333336;
+  --tm-surface-3: #3a3a3c;
+  --tm-hover: #3f3f41;
 
-  --tm-border-subtle: #2d2d2a;
-  --tm-border-default: #3d3d39;
-  --tm-border-strong: #5f5f59;
+  --tm-border-subtle: rgba(255, 255, 255, 0.10);
+  --tm-border-default: rgba(255, 255, 255, 0.13);
+  --tm-border-strong: rgba(255, 255, 255, 0.22);
 
-  --tm-text-strong: #f5f5f4;
-  --tm-text: #c6c6c1;
-  --tm-text-muted: #a4a49f;
-  --tm-text-faint: #73736e;
+  --tm-text-strong: #f5f5f7;
+  --tm-text: #d1d1d6;
+  --tm-text-muted: #a1a1a6;
+  --tm-text-faint: #6e6e73;
 
   --tm-brand: #d4ff40;
   --tm-brand-strong: #e3ff8a;
-  --tm-on-brand: #101204;
-  --tm-brand-soft: rgba(212, 255, 64, 0.10);
-  --tm-brand-soft-strong: rgba(212, 255, 64, 0.16);
-  --tm-brand-border: rgba(212, 255, 64, 0.36);
+  --tm-on-brand: #1d1d1f;
+  --tm-brand-soft: rgba(212, 255, 64, 0.12);
+  --tm-brand-soft-strong: rgba(212, 255, 64, 0.18);
+  --tm-brand-border: rgba(212, 255, 64, 0.40);
 
-  --tm-focus: #7aa7ff;
-  --tm-focus-soft: rgba(122, 167, 255, 0.12);
-  --tm-focus-ring: rgba(122, 167, 255, 0.88);
+  --tm-focus: #0a84ff;
+  --tm-focus-soft: rgba(10, 132, 255, 0.14);
+  --tm-focus-ring: rgba(10, 132, 255, 0.90);
 
-  --tm-info: #7aa7ff;
-  --tm-success: #86d9a5;
-  --tm-warning: #f1bd72;
-  --tm-danger: #ff9aa8;
+  --tm-info: #0a84ff;
+  --tm-success: #32d74b;
+  --tm-warning: #ffd60a;
+  --tm-danger: #ff453a;
 
-  --tm-font-ui: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --tm-font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  --tm-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Segoe UI Variable Display", "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --tm-font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo,
+    Consolas, monospace;
+
+  --tm-chrome: rgba(35, 35, 37, 0.82);
+  --tm-chrome-blur: blur(24px) saturate(1.8);
 
   --tm-motion-fast: 120ms;
   --tm-motion-standard: 180ms;
   --tm-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --tm-canvas: #f5f5f7;
+  --tm-surface-0: #ffffff;
+  --tm-surface-1: #ffffff;
+  --tm-surface-2: #fafafa;
+  --tm-surface-3: #f2f2f4;
+  --tm-hover: #e8e8ed;
+
+  --tm-border-subtle: rgba(0, 0, 0, 0.09);
+  --tm-border-default: rgba(0, 0, 0, 0.12);
+  --tm-border-strong: rgba(0, 0, 0, 0.20);
+
+  --tm-text-strong: #1d1d1f;
+  --tm-text: #3a3a3c;
+  --tm-text-muted: #6e6e73;
+  --tm-text-faint: #86868b;
+
+  /* Lime accent adapted for light backgrounds (same hue, darker value). */
+  --tm-brand: #7fae00;
+  --tm-brand-strong: #6f9a00;
+  --tm-on-brand: #ffffff;
+  --tm-brand-soft: rgba(127, 174, 0, 0.13);
+  --tm-brand-soft-strong: rgba(127, 174, 0, 0.20);
+  --tm-brand-border: rgba(127, 174, 0, 0.42);
+
+  --tm-focus: #007aff;
+  --tm-focus-soft: rgba(0, 122, 255, 0.12);
+  --tm-focus-ring: rgba(0, 122, 255, 0.70);
+
+  --tm-info: #007aff;
+  --tm-success: #248a3d;
+  --tm-warning: #b45309;
+  --tm-danger: #d70015;
+
+  --tm-chrome: rgba(255, 255, 255, 0.75);
 }
 ```
 
@@ -145,7 +188,7 @@ Tony Lime and green are not interchangeable. Pane selection and keyboard focus m
 | Micro label | 8–10 / 13 | counts, state chips, keyboard hints |
 | Mono | 10–13 / 1.35 | terminal, branch, port, command, shortcut |
 
-Inter Variable is the primary UI face. Segoe UI remains a platform fallback. JetBrains Mono is the default terminal and technical face; existing user-saved terminal font preferences remain valid.
+The system UI face is Apple-style: `-apple-system` / `SF Pro Text` / `SF Pro Display`, falling back to `Segoe UI Variable Display` / `Segoe UI` on Windows — no web font is required for chrome. Inter remains a fallback. `ui-monospace` / `SF Mono` / `Cascadia Mono` is the default terminal and technical face; existing user-saved terminal font preferences remain valid.
 
 ### Dimensions
 
@@ -164,6 +207,17 @@ TonyMux uses a 4px spacing rhythm.
 | Visible resizer grip | 2px |
 
 Use 4px radius for tiny labels, 6px for controls, 8px for workspace rows and menus, and 12px only for the command palette and Settings. Primary surfaces use borders rather than shadows. Shadows are reserved for elevated popovers and dialogs.
+
+## Themes
+
+TonyMux ships two themes: **dark** (default) and **light**, both SF-inspired with an adaptive Tony Lime accent.
+
+- The active theme is set via `data-theme="dark" | "light"` on `<html>`, applied by an inline script in `index.html` before first paint (no flash of unstyled content).
+- Initial choice: persisted `tm-theme` in `localStorage` wins; otherwise `prefers-color-scheme` decides.
+- Switching is manual via the Sun/Moon toggle in the workspace topbar (no default shortcut — `Ctrl+Shift+D` stays assigned to Split terminal). `tm:themechange` fires on `window` so live surfaces can react.
+- Components must consume `--tm-*` semantic tokens only — never raw colors — so both themes stay correct without component changes.
+- The xterm.js terminal palette follows the theme at creation and on change (`src/theme.ts` → `getXtermTheme`): opaque dark `#1a1a1c` / opaque white, with the lime cursor matching the active theme.
+- Glass chrome (`--tm-chrome` + `--tm-chrome-blur`) applies only to navigation chrome (sidebar, topbar, status bar) inside an `@supports (backdrop-filter)` guard; terminal and browser content panes always stay opaque. Older WebView2 falls back to solid `--tm-surface-0`.
 
 ## Layout contract
 
@@ -278,6 +332,7 @@ A TonyMux UI change is ready for approval only when:
 - Tony Lime is controlled and not used as success;
 - keyboard focus remains visibly blue;
 - realistic clean, modified, attention, loading, error, disabled, selected, and restored states are checked;
+- both light and dark themes are checked with semantic contrast on accent and status colors;
 - narrow desktop behavior does not overflow or hide primary actions;
 - reduced-motion and forced-colors behavior remain intact;
 - exact-build tests and visual evidence identify the reviewed revision.

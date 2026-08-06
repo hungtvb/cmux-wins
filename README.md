@@ -21,9 +21,9 @@ The repository is delivered through stacked pull requests. Do not merge a stacke
 
 ## Design system
 
-TonyMux uses the **Quiet Operator** design direction: a dark, low-distraction Windows developer workspace where terminal and browser content remain dominant, blue represents focus and selection, and violet is reserved for agent attention that requires human input.
+TonyMux uses the **Tony Workspace** design direction: an adaptive SF-inspired light/dark Windows developer workspace where terminal and browser content remain dominant, blue represents focus, and **Tony Lime** (`#d4ff40` dark / `#7fae00` light) marks brand, selection, and the active pane. A Sun/Moon toggle in the topbar switches themes; the choice persists and follows the system setting on first launch.
 
-See [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) before designing, reviewing, or implementing UI changes. It is the project baseline for layout, tokens, component states, accessibility, and future visual adoption.
+See [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) before designing, reviewing, or implementing UI changes. It is the project baseline for layout, tokens, component states, themes, accessibility, and future visual adoption.
 
 ## Prerequisites
 

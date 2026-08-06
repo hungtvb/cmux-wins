@@ -5,13 +5,17 @@ import {
   GitBranch,
   Globe2,
   MoreHorizontal,
+  Moon,
   PanelLeftClose,
   Search,
   Settings2,
+  Sun,
   Trash2,
 } from "lucide-react";
 import type { MouseEvent } from "react";
+import { useState } from "react";
 import type { ShortcutActionId } from "../shortcuts";
+import { getCurrentTheme, toggleTheme } from "../theme";
 import type { Workspace, WorkspaceMetadata } from "../types";
 
 type WorkspaceTopbarProps = {
@@ -32,6 +36,21 @@ type WorkspaceTopbarProps = {
 
 function closeActionMenu(event: MouseEvent<HTMLButtonElement>) {
   event.currentTarget.closest("details")?.removeAttribute("open");
+}
+
+function ThemeToggleButton() {
+  const [theme, setThemeState] = useState<"dark" | "light">(getCurrentTheme());
+  return (
+    <button
+      className="toolbar-button toolbar-button--compact"
+      type="button"
+      onClick={() => setThemeState(toggleTheme())}
+      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+    >
+      {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+    </button>
+  );
 }
 
 export function WorkspaceTopbar({
@@ -154,6 +173,8 @@ export function WorkspaceTopbar({
             <kbd>{shortcutLabel("commandPalette.open")}</kbd>
           )}
         </button>
+
+        <ThemeToggleButton />
 
         <details className="action-menu">
           <summary className="toolbar-button toolbar-button--compact" title="More workspace actions">

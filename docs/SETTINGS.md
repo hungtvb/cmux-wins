@@ -8,6 +8,10 @@ localStorage["tonymux.settings.v5"]
 
 Versions 4, 3, 2 and 1 are migrated automatically and removed after the next successful save. The settings document contains no credentials, automation token or executable trust decision. Custom profile paths are configuration data and may be exported, but trust remains in the Rust-owned local store described below.
 
+## Theme
+
+Appearance theme (dark/light, SF-inspired with adaptive lime accent) is **not** part of the settings document — it lives in `localStorage["tm-theme"]` so it applies before first paint. First launch follows the system `prefers-color-scheme`; afterwards the topbar Sun/Moon toggle wins and persists. See `docs/DESIGN-SYSTEM.md` → Themes for token behavior.
+
 ## Shell profiles
 
 New terminal panes can use one of four Rust-allowlisted profiles:
