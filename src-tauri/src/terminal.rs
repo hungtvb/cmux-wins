@@ -30,7 +30,7 @@ struct TerminalOutputEvent {
     data: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerminalLifecycleEvent {
     session_id: String,
@@ -323,7 +323,7 @@ fn emit_terminal_lifecycle(app: &AppHandle, session_id: &str, kind: &str, payloa
     let _ = app.emit("terminal-lifecycle", TerminalLifecycleEvent {
         session_id: session_id.to_owned(),
         kind: kind.to_owned(),
-        message: payload.get("error").and_then(Value::as_str).unwrap_or(""),
+        message: payload.get("error").and_then(Value::as_str).unwrap_or("").to_owned(),
     });
 }
 
@@ -337,10 +337,10 @@ fn publish_terminal_event(app: &AppHandle, kind: &str, payload: Value) {
 /// Map a terminal exit code to a user-facing lifecycle hint. ssh.exe uses
 /// 255 for connection/host-key/auth failures and 1 for remote command errors;
 /// everything else is a generic message.
-fn terminal_exit_message(exit_code: Option<i32>) -> &'static str {
+fn terminal_exit_message(exit_code: u32) -> &'static str {
     match exit_code {
-        Some(255) => "SSH connection failed (host key, authentication or network). Reconnect to retry.",
-        Some(1) => "Remote command exited with an error.",
+        255 => "SSH connection failed (host key, authentication or network). Reconnect to retry.",
+        1 => "Remote command exited with an error.",
         _ => "Terminal session ended.",
     }
 }
@@ -897,9 +897,9 @@ mod tests {
 
     #[test]
     fn terminal_exit_messages_cover_ssh_failure_codes() {
-        assert!(terminal_exit_message(Some(255)).contains("SSH connection failed"));
-        assert!(terminal_exit_message(Some(1)).contains("Remote command exited"));
-        assert_eq!(terminal_exit_message(None), "Terminal session ended.");
-        assert_eq!(terminal_exit_message(Some(0)), "Terminal session ended.");
+        assert!(terminal_exit_message(255).contains("SSH connection failed"));
+        assert!(terminal_exit_message(1).contains("Remote command exited"));
+        assert_eq!(terminal_exit_message(0), "Terminal session ended.");
+        assert_eq!(terminal_exit_message(127), "Terminal session ended.");
     }
 }
