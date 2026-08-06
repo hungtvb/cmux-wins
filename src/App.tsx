@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserPane } from "./components/BrowserPane";
 import { CommandPalette } from "./components/CommandPalette";
@@ -9,7 +10,14 @@ import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { WorkspaceTopbar } from "./components/WorkspaceTopbar";
 import { useAutomationBridge } from "./hooks/useAutomationBridge";
 import { useAutomationEventPublisher } from "./hooks/useAutomationEventPublisher";
+import { useResumeRecords } from "./hooks/useResumeRecords";
 import { useWorkspaceMetadata } from "./hooks/useWorkspaceMetadata";
+import {
+  AGENT_DISPLAY_NAMES,
+  recordsForCwd,
+  toStartupCommand,
+  type ResumeRecord,
+} from "./resumeModel";
 import {
   buildNotificationItems,
   countAttention,
@@ -24,7 +32,7 @@ import {
   shortcutMatchesEvent,
   type ShortcutActionId,
 } from "./shortcuts";
-import type { Pane, Workspace } from "./types";
+import type { Pane, TerminalPaneModel, Workspace } from "./types";
 import {
   WORKSPACE_STATE_VERSION,
   createBrowserPane,
@@ -363,6 +371,55 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
   );
   const unreadNotificationCount = useMemo(() => countAttention(attention), [attention]);
 
+  const { records: resumeRecords } = useResumeRecords(activeWorkspace?.cwd, activeWorkspace?.id);
+  const [resumeNotice, setResumeNotice] = useState<string | null>(null);
+  const workspaceResumeRecords = useMemo(
+    () => (activeWorkspace ? recordsForCwd(resumeRecords, activeWorkspace.cwd) : []),
+    [resumeRecords, activeWorkspace],
+  );
+
+  const resumeAgentSession = useCallback(
+    async (record: ResumeRecord) => {
+      if (!activeWorkspace) return;
+      try {
+        const trusted = await invoke<boolean>("is_shell_executable_trusted", {
+          executable: record.executable,
+        });
+        if (!trusted) {
+          setResumeNotice(
+            `"${record.executable}" is not trusted yet. Approve it in Settings → Trusted executables, then try again.`,
+          );
+          return;
+        }
+      } catch {
+        setResumeNotice("Could not verify the agent executable. Try again.");
+        return;
+      }
+      const terminalBase = createTerminalPane(
+        settings,
+        record.cwd,
+        AGENT_DISPLAY_NAMES[record.agent],
+      ) as TerminalPaneModel;
+      const pane: Pane = {
+        ...terminalBase,
+        terminalSettings: {
+          ...terminalBase.terminalSettings,
+          startupCommand: toStartupCommand(record),
+        },
+      };
+      setWorkspaces((current) =>
+        current.map((workspace) =>
+          workspace.id === activeWorkspace.id
+            ? { ...workspace, panes: [...workspace.panes, pane] }
+            : workspace,
+        ),
+      );
+      setActivePaneByWorkspace((current) => ({ ...current, [activeWorkspace.id]: pane.id }));
+      setResumeNotice(null);
+    },
+    [activeWorkspace, settings],
+  );
+
   const shortcutLabel = useCallback(
     (actionId: ShortcutActionId): string | undefined => {
       const binding = settings.shortcuts[actionId];
@@ -564,6 +621,9 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
           sidebarOpen={sidebarOpen}
           unreadCount={unreadNotificationCount}
           notificationsOpen={notificationsOpen}
+          resumeRecords={workspaceResumeRecords}
+          resumeNotice={resumeNotice}
+          onResume={resumeAgentSession}
           onToggleSidebar={() => setSidebarOpen((open) => !open)}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
           onOpenSettings={requestOpenSettings}

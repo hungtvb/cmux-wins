@@ -992,3 +992,88 @@
     color: HighlightText;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Agent integrations (resume hook setup)                              */
+/* ------------------------------------------------------------------ */
+
+.agent-integrations {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-integrations__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-1);
+}
+
+.agent-integrations__row-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-integrations__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--tm-brand-soft, rgba(212, 255, 64, 0.12));
+  color: var(--tm-brand);
+}
+
+.agent-integrations__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-integrations__text strong {
+  font-size: 12px;
+}
+
+.agent-integrations__text small {
+  color: var(--tm-text-faint);
+  line-height: 1.45;
+}
+
+.agent-integrations__path,
+.agent-integrations__status {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  font-family: var(--tm-font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+.agent-integrations__status {
+  color: var(--tm-warning);
+}
+
+.agent-integrations__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 0;
+}
+
+.agent-integrations__footer small {
+  color: var(--tm-text-faint);
+  line-height: 1.45;
+}
+
+.agent-integrations__footer .settings-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

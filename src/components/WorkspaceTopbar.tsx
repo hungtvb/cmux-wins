@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import type { MouseEvent } from "react";
 import { useState } from "react";
+import { ResumeMenu } from "./ResumeMenu";
+import type { ResumeRecord } from "../resumeModel";
 import type { ShortcutActionId } from "../shortcuts";
 import { getCurrentTheme, toggleTheme } from "../theme";
 import type { Workspace, WorkspaceMetadata } from "../types";
@@ -33,6 +35,9 @@ type WorkspaceTopbarProps = {
   onAddBrowser: () => void;
   onToggleNotifications: () => void;
   onCloseWorkspace: () => void;
+  resumeRecords: ResumeRecord[];
+  resumeNotice: string | null;
+  onResume: (record: ResumeRecord) => void;
 };
 
 function closeActionMenu(event: MouseEvent<HTMLButtonElement>) {
@@ -69,6 +74,9 @@ export function WorkspaceTopbar({
   onAddBrowser,
   onToggleNotifications,
   onCloseWorkspace,
+  resumeRecords,
+  resumeNotice,
+  onResume,
 }: WorkspaceTopbarProps) {
   const hasGitMetadata = Boolean(metadata?.available);
   const repository = metadata?.repository || "Local workspace";
@@ -165,6 +173,14 @@ export function WorkspaceTopbar({
             <Bell size={15} />
             {unreadCount > 0 && <span className="toolbar-button__badge">{unreadCount}</span>}
           </button>
+          {resumeRecords.length > 0 && (
+            <ResumeMenu
+              records={resumeRecords}
+              notice={resumeNotice}
+              onResume={onResume}
+              onOpenSettings={onOpenSettings}
+            />
+          )}
         </div>
 
         <button

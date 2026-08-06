@@ -1254,3 +1254,105 @@ input:focus-visible {
   padding: 8px 10px;
   border-top: 1px solid var(--tm-border-subtle);
 }
+
+/* ------------------------------------------------------------------ */
+/* Resume menu (agent session resume dropdown in the topbar)           */
+/* ------------------------------------------------------------------ */
+
+.resume-menu {
+  position: relative;
+}
+
+.resume-menu__popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  width: 300px;
+  max-height: min(360px, calc(100vh - 120px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--tm-border-default);
+  border-radius: 12px;
+  background: var(--tm-surface-1);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  color: var(--tm-text);
+  font-size: 12px;
+}
+
+.resume-menu__header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--tm-border-subtle);
+  font-weight: 600;
+}
+
+.resume-menu__notice {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--tm-border-subtle);
+  background: var(--tm-warning-soft, rgba(240, 198, 116, 0.12));
+  color: var(--tm-warning, #f0c674);
+  line-height: 1.45;
+}
+
+.resume-menu__empty {
+  padding: 14px 12px;
+  color: var(--tm-text-faint);
+}
+
+.resume-menu__list {
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.resume-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--tm-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.resume-menu__item:hover {
+  background: var(--tm-hover, var(--tm-surface-2));
+}
+
+.resume-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-menu__meta {
+  color: var(--tm-text-faint);
+  font-family: var(--tm-font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+
+.resume-menu__settings {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: 0;
+  border-top: 1px solid var(--tm-border-subtle);
+  background: transparent;
+  color: var(--tm-brand, #d4ff40);
+  font: inherit;
+  cursor: pointer;
+}
+
+.resume-menu__settings:hover {
+  background: var(--tm-hover, var(--tm-surface-2));
+}
