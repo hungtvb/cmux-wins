@@ -69,8 +69,14 @@ export function NotificationPanel({
 
       {items.length === 0 ? (
         <div className="notification-panel__empty">
-          <BellOff size={20} />
-          <span>No unread notifications</span>
+          <BellOff size={26} strokeWidth={1.5} />
+          <span className="notification-panel__empty-title">No unread notifications</span>
+          <span className="notification-panel__empty-hint">
+            Agent prompts appear here when a command needs your attention.
+          </span>
+          <span className="notification-panel__empty-hint">
+            Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>U</kbd> to reopen this panel.
+          </span>
         </div>
       ) : (
         <ul className="notification-panel__list">

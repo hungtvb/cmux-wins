@@ -1278,11 +1278,38 @@ input:focus-visible {
 
 .notification-panel__empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 28px 12px;
+  gap: 6px;
+  padding: 30px 20px;
   color: var(--tm-text-faint);
+  text-align: center;
+}
+
+.notification-panel__empty-title {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tm-text-muted);
+}
+
+.notification-panel__empty-hint {
+  max-width: 240px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.notification-panel__empty-hint kbd {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--tm-border-subtle);
+  border-radius: 4px;
+  background: var(--tm-chrome);
+  font-family: var(--tm-font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--tm-text-secondary);
 }
 
 .notification-panel__list {
@@ -1459,6 +1486,7 @@ input:focus-visible {
   color: var(--tm-text-faint);
   font-family: var(--tm-font-mono, ui-monospace, monospace);
   font-size: 11px;
+  white-space: nowrap;
 }
 
 .resume-menu__settings {
