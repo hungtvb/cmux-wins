@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  Bot,
   CheckCircle2,
   Database,
   Download,
@@ -29,8 +28,10 @@ import {
   type MouseEvent,
 } from "react";
 import type { AgentKind } from "../resumeModel";
+import type { AgentHooksSetupResult } from "../agentIntegrations";
 import { checkFontAvailability, type FontCheckResult } from "../fontAvailability";
 import { TerminalAppearanceSection } from "./sections/TerminalAppearanceSection";
+import { AgentIntegrationsSection } from "./sections/AgentIntegrationsSection";
 import {
   DEFAULT_SETTINGS,
   MAX_CUSTOM_SHELL_PROFILES,
@@ -84,35 +85,6 @@ function cloneSettings(settings: AppSettings): AppSettings {
 }
 
 type TrustedExecutableStatus = "trusted" | "changed" | "missing" | "unavailable";
-
-type AgentHooksSetupResult = {
-  agent: AgentKind;
-  scriptPath: string;
-  configPath: string;
-  message: string;
-};
-
-const AGENT_SETUP_INFO: {
-  agent: AgentKind;
-  title: string;
-  description: string;
-}[] = [
-  {
-    agent: "claude",
-    title: "Claude Code",
-    description: "Stop + SessionEnd hooks save the resume command after every turn and at session end.",
-  },
-  {
-    agent: "codex",
-    title: "Codex",
-    description: "SessionEnd hook writes the resume command within Codex's 3s teardown budget.",
-  },
-  {
-    agent: "opencode",
-    title: "opencode",
-    description: "Global plugin records sessions from session idle events.",
-  },
-];
 
 type TrustedExecutableSnapshot = {
   executable: string;
@@ -1420,65 +1392,12 @@ export function SettingsDialog({
             onChange={updateTerminal}
           />
 
-          <section className="settings-section" aria-labelledby="settings-agents-title">
-            <div className="settings-section__heading">
-              <div className="settings-section__heading-main">
-                <h3 id="settings-agents-title">Agent integrations</h3>
-                <p className="settings-section__description">
-                  Install hooks so agent CLIs record their last session. The Resume
-                  action in the workspace topbar re-attaches a session in a new pane —
-                  the agent executable must be in your trusted identities first.
-                </p>
-              </div>
-            </div>
-            <div className="agent-integrations">
-              {AGENT_SETUP_INFO.map(({ agent, title, description }) => {
-                const status = agentSetupStatus[agent];
-                const busy = agentSetupBusy[agent] === true;
-                const installed = typeof status === "object" && status !== null;
-                return (
-                  <div className="agent-integrations__row" key={agent}>
-                    <div className="agent-integrations__row-main">
-                      <span className="agent-integrations__icon" aria-hidden="true">
-                        <Bot size={14} />
-                      </span>
-                      <div className="agent-integrations__text">
-                        <strong>{title}</strong>
-                        <small>{description}</small>
-                        {installed ? (
-                          <small className="agent-integrations__path">
-                            Hook: {status.scriptPath}
-                            <br />
-                            Config: {status.configPath}
-                          </small>
-                        ) : typeof status === "string" && status ? (
-                          <small className="agent-integrations__status">{status}</small>
-                        ) : null}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      className="settings-action"
-                      disabled={busy}
-                      onClick={() => void installAgentHooks(agent)}
-                    >
-                      {installed ? "Reinstall" : busy ? "Installing…" : "Install hooks"}
-                    </button>
-                  </div>
-                );
-              })}
-              <div className="agent-integrations__footer">
-                <button type="button" className="settings-action" onClick={() => void clearResumeRecords()}>
-                  <Trash2 size={13} />
-                  Clear saved sessions
-                </button>
-                <small>
-                  Sessions are saved to the resume store; nothing is executed until you click
-                  Resume.
-                </small>
-              </div>
-            </div>
-          </section>
+          <AgentIntegrationsSection
+            agentSetupStatus={agentSetupStatus}
+            agentSetupBusy={agentSetupBusy}
+            installAgentHooks={installAgentHooks}
+            clearResumeRecords={clearResumeRecords}
+          />
 
           <section className="settings-section" aria-labelledby="settings-browser-origins-title">
             <div className="settings-section__heading">
