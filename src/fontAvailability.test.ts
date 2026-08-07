@@ -22,39 +22,39 @@ describe("extractFamilies", () => {
 });
 
 describe("checkFontAvailability", () => {
-  it("returns unknown when document.fonts is unavailable", () => {
+  it("returns unknown when document.fonts is unavailable", async () => {
     (globalThis as { document?: unknown }).document = undefined;
-    expect(checkFontAvailability("Foo, monospace")).toEqual({
+    expect(await checkFontAvailability("Foo, monospace")).toEqual({
       family: "Foo, monospace",
       status: "unknown",
       missingFamily: null,
     });
   });
 
-  it("reports available when the first explicit family resolves", () => {
+  it("reports available when the first explicit family loads", async () => {
     const fonts = {
-      check: vi.fn((font: string) => font.includes("JetBrains Mono")),
+      load: vi.fn(async (font: string) =>
+        font.includes("JetBrains Mono") ? [{}] : [],
+      ),
     };
-    (globalThis as { document?: unknown }).document = {
-      fonts,
-    } as never;
-    const result = checkFontAvailability('"JetBrains Mono", monospace');
+    (globalThis as { document?: unknown }).document = { fonts } as never;
+    const result = await checkFontAvailability('"JetBrains Mono", monospace');
     expect(result.status).toBe("available");
-    expect(fonts.check).toHaveBeenCalledWith('16px "JetBrains Mono"');
+    expect(fonts.load).toHaveBeenCalledWith('16px "JetBrains Mono"');
   });
 
-  it("reports unavailable and names the first missing family", () => {
-    const fonts = { check: vi.fn(() => false) };
+  it("reports unavailable and names the first missing family", async () => {
+    const fonts = { load: vi.fn(async () => []) };
     (globalThis as { document?: unknown }).document = { fonts } as never;
-    const result = checkFontAvailability('"MesloLGM Nerd Font", "Meslo LG M", Consolas');
+    const result = await checkFontAvailability('"MesloLGM Nerd Font", "Meslo LG M", Consolas');
     expect(result.status).toBe("unavailable");
     expect(result.missingFamily).toBe("MesloLGM Nerd Font");
   });
 
-  it("treats a stack of only generics as available", () => {
-    const fonts = { check: vi.fn(() => false) };
+  it("treats a stack of only generics as available without loading", async () => {
+    const fonts = { load: vi.fn(async () => []) };
     (globalThis as { document?: unknown }).document = { fonts } as never;
-    expect(checkFontAvailability("monospace, sans-serif").status).toBe("available");
-    expect(fonts.check).not.toHaveBeenCalled();
+    expect((await checkFontAvailability("monospace, sans-serif")).status).toBe("available");
+    expect(fonts.load).not.toHaveBeenCalled();
   });
 });

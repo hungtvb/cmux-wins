@@ -279,7 +279,13 @@ export function SettingsDialog({
 
   // Non-blocking availability hint for the selected terminal font.
   useEffect(() => {
-    setFontCheck(checkFontAvailability(draft.terminal.fontFamily));
+    let cancelled = false;
+    void checkFontAvailability(draft.terminal.fontFamily).then((result) => {
+      if (!cancelled) setFontCheck(result);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [draft.terminal.fontFamily]);
 
   const addTrustedOrigin = async () => {

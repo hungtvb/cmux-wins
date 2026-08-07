@@ -1,11 +1,12 @@
 /**
  * Font availability helpers for the Settings dialog.
  *
- * WebView2 (Chromium) exposes `document.fonts` (a FontFaceSet) which supports
- * `check()` to ask whether a given font string is available without triggering
- * a download. We use it to give a non-blocking hint in Settings when a chosen
- * family (e.g. a Nerd Font for Oh My Posh) is likely unavailable on the box.
- * This never installs or downloads fonts — it only reads the available set.
+ * WebView2 (Chromium) exposes `document.fonts` (a FontFaceSet). `check()` is
+ * not reliable here: Chromium resolves an unknown family to an auto-generated
+ * fallback and reports it as present. We therefore use `fonts.load()`, which
+ * returns the list of FontFace objects actually loaded for the family — an
+ * empty array means the family is not installed. This never installs or
+ * downloads fonts; it only queries the local font set.
  */
 
 export type FontCheckStatus = "available" | "unavailable" | "unknown";
@@ -28,37 +29,35 @@ export function extractFamilies(familyStack: string): string[] {
     .filter(Boolean);
 }
 
-export function checkFontAvailability(familyStack: string): FontCheckResult {
-  if (typeof document === "undefined" || !document.fonts?.check) {
-    return { family: familyStack, status: "unknown", missingFamily: null };
+/**
+ * Resolve the first installed family in a stack. Async because it relies on
+ * `document.fonts.load()`, which goes through the font loading pipeline.
+ */
+export async function checkFontAvailability(familyStack: string): Promise<FontCheckResult> {
+  const base = { family: familyStack, missingFamily: null };
+  if (typeof document === "undefined" || !document.fonts?.load) {
+    return { ...base, status: "unknown" };
   }
   const families = extractFamilies(familyStack);
   if (families.length === 0) {
-    return { family: familyStack, status: "unknown", missingFamily: null };
+    return { ...base, status: "unknown" };
   }
 
-  let firstUnavailable: string | null = null;
-  let seenExplicit = false;
   for (const family of families) {
-    // A generic family is always available; stop at the first generic because
-    // everything after it is just a generic fallback.
     if (GENERIC_FAMILIES.has(family)) break;
-    seenExplicit = true;
-    if (document.fonts.check(`16px "${family}"`)) {
-      // This explicit family resolves — the stack is fine.
-      return { family: familyStack, status: "available", missingFamily: null };
+    try {
+      const loaded = await document.fonts.load(`16px "${family}"`);
+      if (loaded.length > 0) {
+        return { ...base, status: "available" };
+      }
+    } catch {
+      return { ...base, status: "unknown" };
     }
-    if (firstUnavailable === null) firstUnavailable = family;
   }
 
-  if (!seenExplicit) {
-    // Only generics in the stack — always usable.
-    return { family: familyStack, status: "available", missingFamily: null };
+  const explicit = families.filter((family) => !GENERIC_FAMILIES.has(family));
+  if (explicit.length === 0) {
+    return { ...base, status: "available" };
   }
-
-  return {
-    family: familyStack,
-    status: "unavailable",
-    missingFamily: firstUnavailable,
-  };
+  return { ...base, status: "unavailable", missingFamily: explicit[0] ?? null };
 }
