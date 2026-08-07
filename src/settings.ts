@@ -601,8 +601,19 @@ export function saveSettings(
   settings: AppSettings,
   storage: Pick<Storage, "setItem" | "removeItem"> = localStorage,
 ): void {
-  storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalizeSettings(settings)));
-  for (const key of LEGACY_SETTINGS_STORAGE_KEYS) storage.removeItem(key);
+  try {
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalizeSettings(settings)));
+  } catch {
+    // Storage may be unavailable/quota-limited in hardened WebView2 contexts.
+    // The in-memory settings still apply for this session; persistence is best-effort.
+  }
+  for (const key of LEGACY_SETTINGS_STORAGE_KEYS) {
+    try {
+      storage.removeItem(key);
+    } catch {
+      // Non-fatal: cleanup of legacy keys is best-effort.
+    }
+  }
 }
 
 export function importSettings(raw: string): AppSettings {

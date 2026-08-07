@@ -369,24 +369,32 @@ export function loadWorkspaceState(
     return { state: createDefaultWorkspaceState(settings, idFactory), status: "disabled" };
   }
 
-  const current = parseStoredState(storage.getItem(WORKSPACE_STATE_STORAGE_KEY), settings, idFactory);
-  if (current) return { state: current, status: "current" };
+  try {
+    const current = parseStoredState(storage.getItem(WORKSPACE_STATE_STORAGE_KEY), settings, idFactory);
+    if (current) return { state: current, status: "current" };
 
-  const previous = parseStoredState(storage.getItem(WORKSPACE_STATE_PREVIOUS_KEY), settings, idFactory);
-  if (previous) return { state: previous, status: "recovered" };
+    const previous = parseStoredState(storage.getItem(WORKSPACE_STATE_PREVIOUS_KEY), settings, idFactory);
+    if (previous) return { state: previous, status: "recovered" };
 
-  for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) {
-    const migrated = parseStoredState(storage.getItem(key), settings, idFactory);
-    if (migrated) return { state: migrated, status: "migrated" };
+    for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) {
+      const migrated = parseStoredState(storage.getItem(key), settings, idFactory);
+      if (migrated) return { state: migrated, status: "migrated" };
+    }
+  } catch {
+    // Storage read failed (unavailable/quota). Fall through to a fresh state.
   }
 
   return { state: createDefaultWorkspaceState(settings, idFactory), status: "empty" };
 }
 
 export function clearWorkspaceState(storage: StorageLike = localStorage): void {
-  storage.removeItem(WORKSPACE_STATE_STORAGE_KEY);
-  storage.removeItem(WORKSPACE_STATE_PREVIOUS_KEY);
-  for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) storage.removeItem(key);
+  try {
+    storage.removeItem(WORKSPACE_STATE_STORAGE_KEY);
+    storage.removeItem(WORKSPACE_STATE_PREVIOUS_KEY);
+    for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) storage.removeItem(key);
+  } catch {
+    // Non-fatal: cleanup is best-effort when storage is unavailable.
+  }
 }
 
 export function saveWorkspaceState(
@@ -399,20 +407,25 @@ export function saveWorkspaceState(
     return;
   }
 
-  const normalized = normalizeWorkspaceState(value, settings);
-  const currentRaw = storage.getItem(WORKSPACE_STATE_STORAGE_KEY);
-  const current = parseStoredState(currentRaw, settings, defaultIdFactory);
-  if (current) {
-    storage.setItem(WORKSPACE_STATE_PREVIOUS_KEY, JSON.stringify(current));
-  } else {
-    const previous = parseStoredState(
-      storage.getItem(WORKSPACE_STATE_PREVIOUS_KEY),
-      settings,
-      defaultIdFactory,
-    );
-    if (previous) storage.setItem(WORKSPACE_STATE_PREVIOUS_KEY, JSON.stringify(previous));
-    else storage.removeItem(WORKSPACE_STATE_PREVIOUS_KEY);
+  try {
+    const normalized = normalizeWorkspaceState(value, settings);
+    const currentRaw = storage.getItem(WORKSPACE_STATE_STORAGE_KEY);
+    const current = parseStoredState(currentRaw, settings, defaultIdFactory);
+    if (current) {
+      storage.setItem(WORKSPACE_STATE_PREVIOUS_KEY, JSON.stringify(current));
+    } else {
+      const previous = parseStoredState(
+        storage.getItem(WORKSPACE_STATE_PREVIOUS_KEY),
+        settings,
+        defaultIdFactory,
+      );
+      if (previous) storage.setItem(WORKSPACE_STATE_PREVIOUS_KEY, JSON.stringify(previous));
+      else storage.removeItem(WORKSPACE_STATE_PREVIOUS_KEY);
+    }
+    storage.setItem(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(normalized));
+    for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) storage.removeItem(key);
+  } catch {
+    // Persistence is best-effort; a quota/security error must not interrupt
+    // terminal switching. The in-memory workspace state still applies.
   }
-  storage.setItem(WORKSPACE_STATE_STORAGE_KEY, JSON.stringify(normalized));
-  for (const key of LEGACY_WORKSPACE_STORAGE_KEYS) storage.removeItem(key);
 }
