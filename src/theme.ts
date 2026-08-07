@@ -44,6 +44,29 @@ export function toggleTheme(): Theme {
   return next;
 }
 
+/**
+ * Follow OS theme changes while the app is running, but only when the user
+ * has not pinned a theme with an explicit toggle (a stored `tm-theme` key).
+ * Call once at app startup; returns a disposer.
+ */
+export function watchSystemTheme(): () => void {
+  if (typeof window === "undefined" || !window.matchMedia) return () => undefined;
+  const query = window.matchMedia("(prefers-color-scheme: light)");
+  const onChange = (event: MediaQueryListEvent) => {
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    } catch {
+      // storage unavailable: treat as no override and follow the OS.
+    }
+    if (stored === "light" || stored === "dark") return; // user pinned a theme
+    const next: Theme = event.matches ? "light" : "dark";
+    if (next !== getCurrentTheme()) setTheme(next);
+  };
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
 /** xterm.js palette that follows the app theme (GitHub-ish dark/light). */
 export function getXtermTheme(theme: Theme): Record<string, string> {
   if (theme === "light") {

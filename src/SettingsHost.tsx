@@ -3,6 +3,7 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { loadSettings, saveSettings, type AppSettings } from "./settings";
+import { watchSystemTheme } from "./theme";
 import { OPEN_SETTINGS_EVENT } from "./settingsEvents";
 import { isEditableShortcutTarget, shortcutMatchesEvent } from "./shortcuts";
 import { clearWorkspaceState } from "./workspacePersistence";
@@ -12,6 +13,8 @@ export { OPEN_SETTINGS_EVENT } from "./settingsEvents";
 export default function SettingsHost() {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   const [open, setOpen] = useState(false);
+
+  useEffect(() => watchSystemTheme(), []);
 
   useEffect(() => {
     const openSettings = () => setOpen(true);
