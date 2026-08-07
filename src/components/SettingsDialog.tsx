@@ -29,6 +29,7 @@ import {
   type MouseEvent,
 } from "react";
 import type { AgentKind } from "../resumeModel";
+import { checkFontAvailability, type FontCheckResult } from "../fontAvailability";
 import {
   DEFAULT_SETTINGS,
   MAX_CUSTOM_SHELL_PROFILES,
@@ -196,6 +197,11 @@ export function SettingsDialog({
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const trustQueryGenerationRef = useRef(0);
   const [draft, setDraft] = useState(() => cloneSettings(settings));
+  const [fontCheck, setFontCheck] = useState<FontCheckResult>(() => ({
+    family: settings.terminal.fontFamily,
+    status: "unknown",
+    missingFamily: null,
+  }));
   const draftRef = useRef(draft);
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
@@ -270,6 +276,11 @@ export function SettingsDialog({
     if (!open) return;
     void refreshTrustedOrigins();
   }, [open, refreshTrustedOrigins]);
+
+  // Non-blocking availability hint for the selected terminal font.
+  useEffect(() => {
+    setFontCheck(checkFontAvailability(draft.terminal.fontFamily));
+  }, [draft.terminal.fontFamily]);
 
   const addTrustedOrigin = async () => {
     const candidate = originInput.trim();
@@ -1413,6 +1424,41 @@ export function SettingsDialog({
                   value={draft.terminal.fontFamily}
                   onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("fontFamily", event.target.value)}
                 />
+              </label>
+              <label className="settings-field settings-field--wide">
+                <span>Font preset</span>
+                <select
+                  value={draft.terminal.fontFamily}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) => updateTerminal("fontFamily", event.target.value)}
+                >
+                  <optgroup label="Nerd Font (for Oh My Posh)">
+                    <option value='"CaskaydiaCove Nerd Font", "Cascadia Code", monospace'>
+                      CaskaydiaCove Nerd Font
+                    </option>
+                    <option value='"JetBrainsMono Nerd Font", "JetBrains Mono", Consolas, monospace'>
+                      JetBrainsMono Nerd Font
+                    </option>
+                    <option value='"MesloLGM Nerd Font", "Meslo LG M", Consolas, monospace'>
+                      MesloLGM Nerd Font
+                    </option>
+                  </optgroup>
+                  <optgroup label="Monospace">
+                    <option value='"JetBrains Mono", "SFMono-Regular", Consolas, monospace'>
+                      JetBrains Mono (default)
+                    </option>
+                    <option value='"Cascadia Mono", Consolas, monospace'>Cascadia Mono</option>
+                    <option value="Consolas, monospace">Consolas</option>
+                  </optgroup>
+                  <option value={draft.terminal.fontFamily}>
+                    Custom — {draft.terminal.fontFamily}
+                  </option>
+                </select>
+                {fontCheck.status === "unavailable" && fontCheck.missingFamily && (
+                  <span className="settings-field__hint settings-field__hint--warn" role="status">
+                    “{fontCheck.missingFamily}” not found on this machine. If you use Oh My Posh,
+                    install a Nerd Font for Powerline glyphs.
+                  </span>
+                )}
               </label>
               <label className="settings-field">
                 <span>Font size</span>

@@ -154,6 +154,27 @@ export function useTerminalSession({
     fitAddon.fit();
     terminalRef.current = terminal;
 
+    // Wait for fonts to finish loading, then re-apply the font family and
+    // refit. Without this, a Nerd Font (e.g. for Oh My Posh) that loads after
+    // the initial paint would render Powerline glyphs with the fallback font
+    // and stale measurements.
+    const refitAfterFontReady = () => {
+      try {
+        terminal.options.fontFamily = paneSettings.appearance.fontFamily;
+        fitAddon.fit();
+      } catch {
+        // font metrics not available yet — non-fatal.
+      }
+    };
+    const fontSet = (document as Document & { fonts?: FontFaceSet }).fonts;
+    if (fontSet?.ready) {
+      void fontSet.ready
+        .then(() => {
+          if (!disposed) refitAfterFontReady();
+        })
+        .catch(() => undefined);
+    }
+
     const clientId = createTerminalClientId(sessionId);
     terminalSessionLeases.claim(sessionId, clientId);
 

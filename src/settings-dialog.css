@@ -1241,3 +1241,16 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Non-blocking availability hint under a settings field (e.g. terminal font). */
+.settings-field__hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--tm-text-faint, #86868b);
+}
+
+.settings-field__hint--warn {
+  color: var(--tm-warn, #b45309);
+}
