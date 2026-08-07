@@ -30,6 +30,7 @@ import {
 } from "react";
 import type { AgentKind } from "../resumeModel";
 import { checkFontAvailability, type FontCheckResult } from "../fontAvailability";
+import { TerminalAppearanceSection } from "./sections/TerminalAppearanceSection";
 import {
   DEFAULT_SETTINGS,
   MAX_CUSTOM_SHELL_PROFILES,
@@ -49,7 +50,6 @@ import {
   validateSshUser,
   type AppSettings,
   type CustomShellProfile,
-  type CursorStyle,
   type SshProfile,
 } from "../settings";
 import {
@@ -1414,117 +1414,11 @@ export function SettingsDialog({
             </div>
           </section>
 
-          <section className="settings-section" aria-labelledby="settings-terminal-title">
-            <div className="settings-section__heading">
-              <TerminalSquare size={15} aria-hidden="true" />
-              <div>
-                <h3 id="settings-terminal-title">Terminal appearance</h3>
-                <p>Dense defaults tuned for long-running developer workspaces.</p>
-              </div>
-            </div>
-
-            <div className="settings-form-grid">
-              <label className="settings-field settings-field--wide">
-                <span>Font family</span>
-                <input
-                  value={draft.terminal.fontFamily}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("fontFamily", event.target.value)}
-                />
-              </label>
-              <label className="settings-field settings-field--wide">
-                <span>Font preset</span>
-                <select
-                  value={draft.terminal.fontFamily}
-                  onChange={(event: ChangeEvent<HTMLSelectElement>) => updateTerminal("fontFamily", event.target.value)}
-                >
-                  <optgroup label="Nerd Font (for Oh My Posh)">
-                    <option value='"CaskaydiaCove Nerd Font", "Cascadia Code", monospace'>
-                      CaskaydiaCove Nerd Font
-                    </option>
-                    <option value='"JetBrainsMono Nerd Font", "JetBrains Mono", Consolas, monospace'>
-                      JetBrainsMono Nerd Font
-                    </option>
-                    <option value='"MesloLGM Nerd Font", "Meslo LG M", Consolas, monospace'>
-                      MesloLGM Nerd Font
-                    </option>
-                  </optgroup>
-                  <optgroup label="Monospace">
-                    <option value='"JetBrains Mono", "SFMono-Regular", Consolas, monospace'>
-                      JetBrains Mono (default)
-                    </option>
-                    <option value='"Cascadia Mono", Consolas, monospace'>Cascadia Mono</option>
-                    <option value="Consolas, monospace">Consolas</option>
-                  </optgroup>
-                  <option value={draft.terminal.fontFamily}>
-                    Custom — {draft.terminal.fontFamily}
-                  </option>
-                </select>
-                {fontCheck.status === "unavailable" && fontCheck.missingFamily && (
-                  <span className="settings-field__hint settings-field__hint--warn" role="status">
-                    “{fontCheck.missingFamily}” not found on this machine. If you use Oh My Posh,
-                    install a Nerd Font for Powerline glyphs.
-                  </span>
-                )}
-              </label>
-              <label className="settings-field">
-                <span>Font size</span>
-                <input
-                  type="number"
-                  min={10}
-                  max={24}
-                  step={1}
-                  value={draft.terminal.fontSize}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("fontSize", Number(event.target.value))}
-                />
-              </label>
-              <label className="settings-field">
-                <span>Line height</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={2}
-                  step={0.05}
-                  value={draft.terminal.lineHeight}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("lineHeight", Number(event.target.value))}
-                />
-              </label>
-              <label className="settings-field">
-                <span>Cursor</span>
-                <select
-                  value={draft.terminal.cursorStyle}
-                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                    updateTerminal("cursorStyle", event.target.value as CursorStyle)
-                  }
-                >
-                  <option value="bar">Bar</option>
-                  <option value="block">Block</option>
-                  <option value="underline">Underline</option>
-                </select>
-              </label>
-              <label className="settings-field">
-                <span>Scrollback lines</span>
-                <input
-                  type="number"
-                  min={1_000}
-                  max={100_000}
-                  step={1_000}
-                  value={draft.terminal.scrollback}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("scrollback", Number(event.target.value))}
-                />
-              </label>
-              <label className="settings-toggle settings-field--wide">
-                <input
-                  type="checkbox"
-                  checked={draft.terminal.cursorBlink}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => updateTerminal("cursorBlink", event.target.checked)}
-                />
-                <span>
-                  <strong>Blinking cursor</strong>
-                  <small>Disable it for reduced visual motion.</small>
-                </span>
-              </label>
-            </div>
-          </section>
+          <TerminalAppearanceSection
+            terminal={draft.terminal}
+            fontCheck={fontCheck}
+            onChange={updateTerminal}
+          />
 
           <section className="settings-section" aria-labelledby="settings-agents-title">
             <div className="settings-section__heading">
