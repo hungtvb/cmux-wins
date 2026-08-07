@@ -61,6 +61,7 @@ import {
   type ShortcutActionId,
 } from "../shortcuts";
 import { MAX_TERMINAL_HISTORY_LINES } from "../terminalHistory";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type SettingsDialogProps = {
   open: boolean;
@@ -229,9 +230,24 @@ export function SettingsDialog({
   };
 
   const clearResumeRecords = async () => {
-    if (!window.confirm("Clear every saved agent resume session?")) return;
-    await invoke<number>("clear_all_resume_records").catch(() => undefined);
+    setConfirmRequest({
+      title: "Clear resume sessions",
+      message: "Clear every saved agent resume session?",
+      confirmLabel: "Clear",
+      danger: true,
+      action: async () => {
+        await invoke<number>("clear_all_resume_records").catch(() => undefined);
+      },
+    });
   };
+
+  const [confirmRequest, setConfirmRequest] = useState<{
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    danger?: boolean;
+    action: () => void | Promise<void>;
+  } | null>(null);
 
   const [trustedOrigins, setTrustedOrigins] = useState<string[]>([]);
   const [originInput, setOriginInput] = useState("");
@@ -285,17 +301,24 @@ export function SettingsDialog({
   };
 
   const clearTrustedOrigins = async () => {
-    if (!window.confirm("Remove every trusted browser origin?")) return;
-    setOriginBusy(true);
-    setOriginNotice(null);
-    try {
-      await invoke<number>("clear_trusted_browser_origins");
-      await refreshTrustedOrigins();
-    } catch (error) {
-      setOriginNotice(String(error));
-    } finally {
-      setOriginBusy(false);
-    }
+    setConfirmRequest({
+      title: "Clear trusted origins",
+      message: "Remove every trusted browser origin?",
+      confirmLabel: "Clear",
+      danger: true,
+      action: async () => {
+        setOriginBusy(true);
+        setOriginNotice(null);
+        try {
+          await invoke<number>("clear_trusted_browser_origins");
+          await refreshTrustedOrigins();
+        } catch (error) {
+          setOriginNotice(String(error));
+        } finally {
+          setOriginBusy(false);
+        }
+      },
+    });
   };
 
   useEffect(() => {
@@ -415,55 +438,55 @@ export function SettingsDialog({
   };
 
   const removeCustomShellProfile = async (profileId: string) => {
-    const currentDraft = draftRef.current;
-    const profile = currentDraft.customShellProfiles.find((candidate) => candidate.id === profileId);
-    if (!profile) return;
-    const executable = normalizeCustomShellExecutable(profile.executable);
-    const otherReferences = countCustomShellProfilesUsingExecutable(
-      currentDraft,
-      executable,
-      profileId,
-    );
-    let trustRevoked = false;
-
-    if (executable && otherReferences === 0 && trustStore.healthy) {
-      const confirmed = window.confirm(
-        `Remove ${profile.label || "this profile"} and revoke any trust record for ${executable}? Existing terminal processes will keep running.`,
+      const currentDraft = draftRef.current;
+      const profile = currentDraft.customShellProfiles.find((candidate) => candidate.id === profileId);
+      if (!profile) return;
+      const executable = normalizeCustomShellExecutable(profile.executable);
+      const otherReferences = countCustomShellProfilesUsingExecutable(
+        currentDraft,
+        executable,
+        profileId,
       );
-      if (!confirmed) return;
-      setTrustPendingId(profileId);
-      try {
-        trustRevoked = await invoke<boolean>("revoke_shell_executable", { executable });
-      } catch (cause) {
-        setTrustStatus(`Unable to revoke ${executable}: ${String(cause)}`);
-        setTrustPendingId(null);
-        return;
-      }
-    }
 
-    const remainingProfiles = currentDraft.customShellProfiles.filter(
-      (candidate) => candidate.id !== profileId,
-    );
-    const nextDraft = {
-      ...currentDraft,
-      defaultShellProfileId:
-        currentDraft.defaultShellProfileId === profileId
-          ? DEFAULT_SETTINGS.defaultShellProfileId
-          : currentDraft.defaultShellProfileId,
-      customShellProfiles: remainingProfiles,
-    };
-    setDraft(nextDraft);
-    draftRef.current = nextDraft;
-    setTrustPendingId(null);
-    const message =
-      otherReferences > 0
-        ? "Profile removed. Trust was retained because another profile uses the same executable."
-        : trustRevoked
-          ? "Profile removed and its final executable trust was revoked."
-          : !trustStore.healthy
-            ? "Profile removed. Reset the unreadable trust store separately before trusting another executable."
-            : "Profile removed. No persisted trust record needed revocation.";
-    await refreshTrustState(remainingProfiles, message);
+      const doRemove = () => {
+        const remainingProfiles = currentDraft.customShellProfiles.filter(
+          (candidate) => candidate.id !== profileId,
+        );
+        const nextDraft = {
+          ...currentDraft,
+          defaultShellProfileId:
+            currentDraft.defaultShellProfileId === profileId
+              ? DEFAULT_SETTINGS.defaultShellProfileId
+              : currentDraft.defaultShellProfileId,
+          customShellProfiles: remainingProfiles,
+        };
+        setDraft(nextDraft);
+        draftRef.current = nextDraft;
+        setTrustPendingId(null);
+        setTrustStatus(`Removed ${profile.label || "profile"}.`);
+      };
+
+      if (executable && otherReferences === 0 && trustStore.healthy) {
+        setConfirmRequest({
+          title: "Remove profile and revoke trust",
+          message: `Remove ${profile.label || "this profile"} and revoke any trust record for ${executable}? Existing terminal processes will keep running.`,
+          confirmLabel: "Remove",
+          danger: true,
+          action: async () => {
+            setTrustPendingId(profileId);
+            try {
+              await invoke<boolean>("revoke_shell_executable", { executable });
+            } catch (cause) {
+              setTrustStatus(`Unable to revoke ${executable}: ${String(cause)}`);
+              setTrustPendingId(null);
+              return;
+            }
+            doRemove();
+          },
+        });
+      } else {
+        doRemove();
+      }
   };
 
   const trustCustomShellProfile = async (profile: CustomShellProfile) => {
@@ -572,44 +595,56 @@ export function SettingsDialog({
   };
 
   const revokeTrustedExecutable = async (entry: TrustedExecutableSnapshot) => {
-    if (!window.confirm(`Revoke trust for ${entry.executable}? New terminal panes cannot launch it until trusted again.`)) {
-      return;
-    }
-    setTrustStorePendingPath(entry.executable);
-    setTrustStatus(`Revoking ${entry.executable}…`);
-    try {
-      await invoke<boolean>("revoke_shell_executable", { executable: entry.executable });
-      await refreshTrustState(
-        draftRef.current.customShellProfiles,
-        `Trust revoked for ${entry.executable}.`,
-      );
-    } catch (cause) {
-      setTrustStatus(`Unable to revoke ${entry.executable}: ${String(cause)}`);
-    } finally {
-      setTrustStorePendingPath(null);
-    }
+    setConfirmRequest({
+      title: "Revoke trust",
+      message: `Revoke trust for ${entry.executable}? New terminal panes cannot launch it until trusted again.`,
+      confirmLabel: "Revoke",
+      danger: true,
+      action: async () => {
+        setTrustStorePendingPath(entry.executable);
+        setTrustStatus(`Revoking ${entry.executable}…`);
+        try {
+          await invoke<boolean>("revoke_shell_executable", { executable: entry.executable });
+          await refreshTrustState(
+            draftRef.current.customShellProfiles,
+            `Trust revoked for ${entry.executable}.`,
+          );
+        } catch (cause) {
+          setTrustStatus(`Unable to revoke ${entry.executable}: ${String(cause)}`);
+        } finally {
+          setTrustStorePendingPath(null);
+        }
+      },
+    });
   };
 
   const clearTrustedExecutables = async () => {
-    const message = trustStore.healthy
-      ? "Clear every trusted custom executable? All custom profiles must be trusted again before launch."
-      : "Reset the unreadable trust store? Existing trust decisions will be discarded.";
-    if (!window.confirm(message)) return;
-    setTrustStorePendingPath("*");
-    setTrustStatus(trustStore.healthy ? "Clearing trusted executables…" : "Resetting trust store…");
-    try {
-      const removed = await invoke<number>("clear_trusted_shell_executables");
-      await refreshTrustState(
-        draftRef.current.customShellProfiles,
-        trustStore.healthy
-          ? `Cleared ${removed} trusted executable${removed === 1 ? "" : "s"}.`
-          : "Trust store reset. Custom executables must be trusted again.",
-      );
-    } catch (cause) {
-      setTrustStatus(`Unable to reset trusted executables: ${String(cause)}`);
-    } finally {
-      setTrustStorePendingPath(null);
-    }
+    const healthy = trustStore.healthy;
+    setConfirmRequest({
+      title: healthy ? "Clear trusted executables" : "Reset trust store",
+      message: healthy
+        ? "Clear every trusted custom executable? All custom profiles must be trusted again before launch."
+        : "Reset the unreadable trust store? Existing trust decisions will be discarded.",
+      confirmLabel: healthy ? "Clear" : "Reset",
+      danger: true,
+      action: async () => {
+        setTrustStorePendingPath("*");
+        setTrustStatus(healthy ? "Clearing trusted executables…" : "Resetting trust store…");
+        try {
+          const removed = await invoke<number>("clear_trusted_shell_executables");
+          await refreshTrustState(
+            draftRef.current.customShellProfiles,
+            healthy
+              ? `Cleared ${removed} trusted executable${removed === 1 ? "" : "s"}.`
+              : "Trust store reset. Custom executables must be trusted again.",
+          );
+        } catch (cause) {
+          setTrustStatus(`Unable to reset trusted executables: ${String(cause)}`);
+        } finally {
+          setTrustStorePendingPath(null);
+        }
+      },
+    });
   };
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -767,12 +802,17 @@ export function SettingsDialog({
   };
 
   const clearSavedWorkspaceState = () => {
-    if (!window.confirm("Clear saved TonyMux workspace state? Current panes will remain open.")) {
-      return;
-    }
-    onClearWorkspaceState();
-    setNotice("Saved workspace state cleared. Current panes remain open until you close TonyMux.");
-    setErrors([]);
+    setConfirmRequest({
+      title: "Clear saved workspace state",
+      message: "Clear saved TonyMux workspace state? Current panes will remain open.",
+      confirmLabel: "Clear",
+      danger: true,
+      action: () => {
+        onClearWorkspaceState();
+        setNotice("Saved workspace state cleared. Current panes remain open until you close TonyMux.");
+        setErrors([]);
+      },
+    });
   };
 
   const exportFile = () => {
@@ -1793,6 +1833,15 @@ export function SettingsDialog({
           </div>
         </footer>
       </div>
+      <ConfirmDialog
+        open={confirmRequest !== null}
+        title={confirmRequest?.title ?? ""}
+        message={confirmRequest?.message ?? ""}
+        confirmLabel={confirmRequest?.confirmLabel}
+        danger={confirmRequest?.danger}
+        onConfirm={() => void confirmRequest?.action()}
+        onClose={() => setConfirmRequest(null)}
+      />
     </div>
   );
 }

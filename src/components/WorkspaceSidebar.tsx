@@ -8,12 +8,15 @@ import {
   X,
 } from "lucide-react";
 import { memo } from "react";
+import type { AppSettings } from "../settings";
 import type { Workspace, WorkspaceMetadata } from "../types";
+import { ShortcutHints } from "./ShortcutHints";
 
 type WorkspaceSidebarProps = {
   workspaces: Workspace[];
   metadataByWorkspace: Record<string, WorkspaceMetadata | undefined>;
   activeWorkspaceId: string;
+  settings: AppSettings;
   onSelect: (workspaceId: string) => void;
   onAdd: () => void;
   onClose: (workspaceId: string) => void;
@@ -33,6 +36,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   workspaces,
   metadataByWorkspace,
   activeWorkspaceId,
+  settings,
   onSelect,
   onAdd,
   onClose,
@@ -147,6 +151,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
       </nav>
 
       <div className="sidebar__footer">
+        <ShortcutHints settings={settings} />
         <span className="sidebar__host-status">
           <span className="status-dot" />
           Terminal host online

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import App from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { loadSettings, saveSettings, type AppSettings } from "./settings";
 import { OPEN_SETTINGS_EVENT } from "./settingsEvents";
@@ -45,14 +46,18 @@ export default function SettingsHost() {
 
   return (
     <>
-      <App settings={settings} keyboardShortcutsEnabled={!open} />
-      <SettingsDialog
-        open={open}
-        settings={settings}
-        onSave={handleSave}
-        onClearWorkspaceState={handleClearWorkspaceState}
-        onClose={() => setOpen(false)}
-      />
+      <ErrorBoundary label="app">
+        <App settings={settings} keyboardShortcutsEnabled={!open} />
+      </ErrorBoundary>
+      <ErrorBoundary label="settings">
+        <SettingsDialog
+          open={open}
+          settings={settings}
+          onSave={handleSave}
+          onClearWorkspaceState={handleClearWorkspaceState}
+          onClose={() => setOpen(false)}
+        />
+      </ErrorBoundary>
     </>
   );
 }

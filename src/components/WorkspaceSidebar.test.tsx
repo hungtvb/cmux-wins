@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_SETTINGS } from "../settings";
 import type { Workspace, WorkspaceMetadata } from "../types";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
@@ -30,6 +31,7 @@ describe("WorkspaceSidebar", () => {
         workspaces={[workspace]}
         metadataByWorkspace={{ [workspace.id]: metadata }}
         activeWorkspaceId={workspace.id}
+        settings={DEFAULT_SETTINGS}
         onSelect={vi.fn()}
         onAdd={vi.fn()}
         onClose={vi.fn()}

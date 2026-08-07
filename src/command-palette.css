@@ -142,6 +142,7 @@
 
 .command-palette__item-copy strong,
 .command-palette__item-copy small {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

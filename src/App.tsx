@@ -4,6 +4,7 @@ import { BrowserPane } from "./components/BrowserPane";
 import { CommandPalette } from "./components/CommandPalette";
 import type { CommandPaletteItem } from "./components/commandPaletteModel";
 import { CreateWorkspaceDialog } from "./components/CreateWorkspaceDialog";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NotificationPanel } from "./components/NotificationPanel";
 import { ResizablePaneGrid } from "./components/ResizablePaneGrid";
 import { TerminalPane } from "./components/TerminalPane";
@@ -704,6 +705,7 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
           workspaces={workspaces}
           metadataByWorkspace={metadataByWorkspace}
           activeWorkspaceId={activeWorkspace.id}
+          settings={settings}
           onSelect={selectWorkspace}
           onAdd={addWorkspace}
           onClose={closeWorkspace}
@@ -762,43 +764,45 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
                       setActivePaneByWorkspace((current) => ({ ...current, [workspace.id]: pane.id }));
                     const focused = pane.id === activePaneId;
 
-                    return pane.kind === "browser" ? (
-                      <BrowserPane
-                        key={pane.id}
-                        paneId={pane.id}
-                        title={pane.title}
-                        url={pane.url}
-                        active={workspace.id === activeWorkspace.id}
-                        focused={focused}
-                        onFocus={focusPane}
-                        onUrlChange={handleBrowserUrlChange}
-                        onTitleChange={handleTitleChange}
-                        onClose={closePane}
-                      />
-                    ) : (
-                      <TerminalPane
-                        key={pane.id}
-                        workspaceId={workspace.id}
-                        sessionId={pane.id}
-                        title={pane.title}
-                        cwd={workspace.cwd}
-                        paneSettings={pane.terminalSettings}
-                        restored={pane.restored}
-                        restoredHistory={pane.restored ? pane.historySnapshot : undefined}
-                        historyLineLimit={
-                          settings.persistence.restoreWorkspaces
-                            ? settings.persistence.terminalHistoryLines
-                            : 0
-                        }
-                        attention={Boolean(attention[pane.id])}
-                        focused={focused}
-                        onFocus={focusPane}
-                        onHistoryChange={handleHistoryChange}
-                        onAttention={handleAttention}
-                        onTitleChange={handleTitleChange}
-                        onReconnect={reconnectPane}
-                        onClose={closePane}
-                      />
+                    return (
+                      <ErrorBoundary key={pane.id} label="pane">
+                        {pane.kind === "browser" ? (
+                          <BrowserPane
+                            paneId={pane.id}
+                            title={pane.title}
+                            url={pane.url}
+                            active={workspace.id === activeWorkspace.id}
+                            focused={focused}
+                            onFocus={focusPane}
+                            onUrlChange={handleBrowserUrlChange}
+                            onTitleChange={handleTitleChange}
+                            onClose={closePane}
+                          />
+                        ) : (
+                          <TerminalPane
+                            workspaceId={workspace.id}
+                            sessionId={pane.id}
+                            title={pane.title}
+                            cwd={workspace.cwd}
+                            paneSettings={pane.terminalSettings}
+                            restored={pane.restored}
+                            restoredHistory={pane.restored ? pane.historySnapshot : undefined}
+                            historyLineLimit={
+                              settings.persistence.restoreWorkspaces
+                                ? settings.persistence.terminalHistoryLines
+                                : 0
+                            }
+                            attention={Boolean(attention[pane.id])}
+                            focused={focused}
+                            onFocus={focusPane}
+                            onHistoryChange={handleHistoryChange}
+                            onAttention={handleAttention}
+                            onTitleChange={handleTitleChange}
+                            onReconnect={reconnectPane}
+                            onClose={closePane}
+                          />
+                        )}
+                      </ErrorBoundary>
                     );
                   })}
                 </ResizablePaneGrid>
