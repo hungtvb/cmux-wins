@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   type Dispatch,
+  type MutableRefObject,
   type SetStateAction,
 } from "react";
 import {
@@ -22,6 +23,8 @@ type AutomationRequestEvent = {
 type UseAutomationBridgeOptions = {
   workspaces: Workspace[];
   activeWorkspaceId: string;
+  attention: Record<string, string>;
+  activeWorkspaceIdRef: MutableRefObject<string>;
   setWorkspaces: Dispatch<SetStateAction<Workspace[]>>;
   setActiveWorkspaceId: Dispatch<SetStateAction<string>>;
   setAttention: Dispatch<SetStateAction<Record<string, string>>>;
@@ -30,6 +33,8 @@ type UseAutomationBridgeOptions = {
 export function useAutomationBridge({
   workspaces,
   activeWorkspaceId,
+  attention,
+  activeWorkspaceIdRef,
   setWorkspaces,
   setActiveWorkspaceId,
   setAttention,
@@ -37,7 +42,7 @@ export function useAutomationBridge({
   const stateRef = useRef<WorkspaceAutomationState>({
     workspaces,
     activeWorkspaceId,
-    attention: {},
+    attention,
   });
 
   useEffect(() => {
@@ -47,6 +52,10 @@ export function useAutomationBridge({
   useEffect(() => {
     stateRef.current = { ...stateRef.current, activeWorkspaceId };
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    stateRef.current = { ...stateRef.current, attention };
+  }, [attention]);
 
   useEffect(() => {
     let disposed = false;
@@ -66,8 +75,16 @@ export function useAutomationBridge({
           event.payload.params,
         );
         stateRef.current = outcome.state;
-        setWorkspaces(outcome.state.workspaces);
-        setActiveWorkspaceId(outcome.state.activeWorkspaceId);
+        // Functional updates: never clobber a concurrent user edit that
+        // landed between the snapshot and this commit.
+        setWorkspaces(() => outcome.state.workspaces);
+        setActiveWorkspaceId((current) => {
+          // Keep the ref in lockstep with automation-driven switches so
+          // attention/unread logic never reads a stale active workspace.
+          if (current === outcome.state.activeWorkspaceId) return current;
+          activeWorkspaceIdRef.current = outcome.state.activeWorkspaceId;
+          return outcome.state.activeWorkspaceId;
+        });
 
         if (event.payload.method === "pane.close") {
           const paneId = event.payload.params.paneId;
@@ -142,5 +159,5 @@ export function useAutomationBridge({
         }).catch(() => undefined),
       );
     };
-  }, [setActiveWorkspaceId, setAttention, setWorkspaces]);
+  }, [setActiveWorkspaceId, setAttention, setWorkspaces, activeWorkspaceIdRef]);
 }

@@ -85,8 +85,17 @@ describe("findWorkspaceForPane", () => {
 });
 
 describe("countAttention", () => {
-  it("counts outstanding entries", () => {
-    expect(countAttention({})).toBe(0);
-    expect(countAttention({ "pane-1": "a", "pane-2": "b" })).toBe(2);
+  it("counts outstanding entries that map to live panes", () => {
+    const workspaces = [makeWorkspace()];
+    expect(countAttention({}, workspaces)).toBe(0);
+    expect(countAttention({ "pane-1": "a", "pane-2": "b" }, workspaces)).toBe(2);
+  });
+
+  it("ignores stale entries whose pane no longer exists", () => {
+    const workspaces = [makeWorkspace()];
+    // makeWorkspace() presumably has pane ids; count only the live ones.
+    const live = workspaces[0].panes.map((pane) => pane.id);
+    const stale = { "gone-pane": "stale", ...Object.fromEntries(live.map((id) => [id, "msg"])) };
+    expect(countAttention(stale, workspaces)).toBe(live.length);
   });
 });

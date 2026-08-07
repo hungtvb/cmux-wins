@@ -63,7 +63,23 @@ export function findWorkspaceForPane(
   return null;
 }
 
-/** Total number of outstanding attention entries across all workspaces. */
-export function countAttention(attention: Record<string, string>): number {
-  return Object.keys(attention).length;
+/**
+ * Total number of outstanding attention entries that map to a live pane.
+ * Counting raw keys would over-report when a closed pane leaves a stale
+ * attention entry behind (see buildNotificationItems, which skips those),
+ * so the badge stays in lockstep with the rendered panel.
+ */
+export function countAttention(
+  attention: Record<string, string>,
+  workspaces: Workspace[],
+): number {
+  const livePaneIds = new Set<string>();
+  for (const workspace of workspaces) {
+    for (const pane of workspace.panes) livePaneIds.add(pane.id);
+  }
+  let count = 0;
+  for (const paneId of Object.keys(attention)) {
+    if (livePaneIds.has(paneId)) count += 1;
+  }
+  return count;
 }

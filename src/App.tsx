@@ -82,6 +82,8 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
   useAutomationBridge({
     workspaces,
     activeWorkspaceId,
+    attention,
+    activeWorkspaceIdRef,
     setWorkspaces,
     setActiveWorkspaceId,
     setAttention,
@@ -436,7 +438,10 @@ export default function App({ settings, keyboardShortcutsEnabled = true }: AppPr
     () => buildNotificationItems(attention, workspaces),
     [attention, workspaces],
   );
-  const unreadNotificationCount = useMemo(() => countAttention(attention), [attention]);
+  const unreadNotificationCount = useMemo(
+    () => countAttention(attention, workspaces),
+    [attention, workspaces],
+  );
 
   const { records: resumeRecords } = useResumeRecords(activeWorkspace?.cwd, activeWorkspace?.id);
   const [resumeNotice, setResumeNotice] = useState<string | null>(null);

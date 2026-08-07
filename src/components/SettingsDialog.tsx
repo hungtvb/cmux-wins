@@ -385,7 +385,10 @@ export function SettingsDialog({
     };
     setDraft((current) => ({
       ...current,
-      defaultShellProfileId: profile.id,
+      // Only adopt the new profile as default when there is no default yet
+      // (or the current default is the empty "system default"). Adding a
+      // profile must not silently hijack a user's existing choice.
+      defaultShellProfileId: current.defaultShellProfileId || profile.id,
       customShellProfiles: [...current.customShellProfiles, profile],
     }));
     setTrustedExecutables((current) => ({ ...current, [profile.id]: false }));
@@ -520,7 +523,9 @@ export function SettingsDialog({
     };
     setDraft((current) => ({
       ...current,
-      defaultShellProfileId: profile.id,
+      // Preserve an existing default: adding an SSH host must not silently
+      // change what the user already chose as their default shell.
+      defaultShellProfileId: current.defaultShellProfileId || profile.id,
       sshProfiles: [...current.sshProfiles, profile],
     }));
   };
@@ -539,13 +544,15 @@ export function SettingsDialog({
   };
 
   const updateSshProfilePort = (profileId: string, value: string) => {
-    const port = Number.parseInt(value, 10);
+    // Only commit a parseable port. An empty/invalid input keeps the
+    // previous value so the model never holds an unusable 0 that would
+    // trip validateSshPort and silently block Save.
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) return;
     setDraft((current) => ({
       ...current,
       sshProfiles: current.sshProfiles.map((profile) =>
-        profile.id === profileId
-          ? { ...profile, port: Number.isNaN(port) ? 0 : port }
-          : profile,
+        profile.id === profileId ? { ...profile, port: parsed } : profile,
       ),
     }));
   };
