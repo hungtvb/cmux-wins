@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { SettingsDialog } from "./components/SettingsDialog";
 import { loadSettings, saveSettings, type AppSettings } from "./settings";
 import { watchSystemTheme } from "./theme";
 import { OPEN_SETTINGS_EVENT } from "./settingsEvents";
@@ -9,6 +8,12 @@ import { isEditableShortcutTarget, shortcutMatchesEvent } from "./shortcuts";
 import { clearWorkspaceState } from "./workspacePersistence";
 
 export { OPEN_SETTINGS_EVENT } from "./settingsEvents";
+
+// SettingsDialog is the largest component (~1.9k lines). Lazy-load it so the
+// initial bundle stays small; it only matters once the user opens Settings.
+const SettingsDialog = lazy(() =>
+  import("./components/SettingsDialog").then((m) => ({ default: m.SettingsDialog })),
+);
 
 export default function SettingsHost() {
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
@@ -53,13 +58,15 @@ export default function SettingsHost() {
         <App settings={settings} keyboardShortcutsEnabled={!open} />
       </ErrorBoundary>
       <ErrorBoundary label="settings">
-        <SettingsDialog
-          open={open}
-          settings={settings}
-          onSave={handleSave}
-          onClearWorkspaceState={handleClearWorkspaceState}
-          onClose={() => setOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <SettingsDialog
+            open={open}
+            settings={settings}
+            onSave={handleSave}
+            onClearWorkspaceState={handleClearWorkspaceState}
+            onClose={() => setOpen(false)}
+          />
+        </Suspense>
       </ErrorBoundary>
     </>
   );
