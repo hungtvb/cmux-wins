@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AppSettings } from "../settings";
 import {
   formatShortcutBinding,
@@ -23,15 +23,15 @@ const HINT_ORDER: ShortcutActionId[] = [
  * intrusive onboarding modal.
  */
 export function ShortcutHints({ settings }: { settings: AppSettings }) {
-  const [dismissed, setDismissed] = useState(true);
-
-  useEffect(() => {
+  // Read the dismissal flag synchronously so SSR/static markup and the first
+  // paint agree (no flash of hints for users who already dismissed them).
+  const [dismissed, setDismissed] = useState<boolean>(() => {
     try {
-      setDismissed(localStorage.getItem(STORAGE_KEY) === "1");
+      return localStorage.getItem(STORAGE_KEY) === "1";
     } catch {
-      setDismissed(true);
+      return true;
     }
-  }, []);
+  });
 
   if (dismissed) return null;
 
