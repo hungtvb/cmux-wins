@@ -1,6 +1,6 @@
 [package]
 name = "tonymux"
-version = "0.3.0"
+version = "0.4.0"
 description = "TonyMux — a Windows 11 terminal workspace for AI coding agents"
 authors = ["Hung"]
 edition = "2021"
