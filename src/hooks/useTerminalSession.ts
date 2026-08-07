@@ -140,10 +140,12 @@ export function useTerminalSession({
       allowProposedApi: false,
       cursorBlink: paneSettings.appearance.cursorBlink,
       cursorStyle: paneSettings.appearance.cursorStyle,
+      fastScrollSensitivity: 4,
       fontFamily: paneSettings.appearance.fontFamily,
       fontSize: paneSettings.appearance.fontSize,
       lineHeight: paneSettings.appearance.lineHeight,
       scrollback: paneSettings.appearance.scrollback,
+      scrollSensitivity: 1,
       theme: getXtermTheme(getCurrentTheme()),
     });
     const fitAddon = new FitAddon();

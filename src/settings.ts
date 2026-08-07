@@ -124,7 +124,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     lineHeight: 1.25,
     cursorStyle: "bar",
     cursorBlink: true,
-    scrollback: 10_000,
+    scrollback: 30_000,
   },
   persistence: {
     restoreWorkspaces: true,
