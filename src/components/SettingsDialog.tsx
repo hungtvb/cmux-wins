@@ -1,10 +1,7 @@
 import {
-  Database,
   Download,
-  Keyboard,
   RotateCcw,
   Settings2,
-  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -26,6 +23,8 @@ import { TerminalAppearanceSection } from "./sections/TerminalAppearanceSection"
 import { AgentIntegrationsSection } from "./sections/AgentIntegrationsSection";
 import { BrowserOriginsSection } from "./sections/BrowserOriginsSection";
 import { ShellAndTrustSection } from "./sections/ShellAndTrustSection";
+import { PersistenceSection } from "./sections/PersistenceSection";
+import { ShortcutsSection } from "./sections/ShortcutsSection";
 import {
   DEFAULT_SETTINGS,
   MAX_CUSTOM_SHELL_PROFILES,
@@ -44,14 +43,12 @@ import {
 } from "../settings";
 import {
   DEFAULT_SHORTCUT_BINDINGS,
-  SHORTCUT_ACTIONS,
   findShortcutConflict,
   formatShortcutBinding,
   getShortcutAction,
   shortcutFromKeyboardEvent,
   type ShortcutActionId,
 } from "../shortcuts";
-import { MAX_TERMINAL_HISTORY_LINES } from "../terminalHistory";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 type SettingsDialogProps = {
@@ -929,159 +926,25 @@ export function SettingsDialog({
             clearTrustedOrigins={clearTrustedOrigins}
           />
 
-          <section className="settings-section" aria-labelledby="settings-shortcuts-title">
-            <div className="settings-section__heading settings-section__heading--actions">
-              <div className="settings-section__heading-main">
-                <Keyboard size={15} aria-hidden="true" />
-                <div>
-                  <h3 id="settings-shortcuts-title">Keyboard shortcuts</h3>
-                  <p id={shortcutsHelpId}>
-                    Select a binding, then press Ctrl or Alt with another key. Physical key positions keep bindings stable across keyboard layouts.
-                  </p>
-                </div>
-              </div>
-              <button
-                className="settings-button settings-button--quiet settings-button--compact"
-                type="button"
-                onClick={resetShortcuts}
-              >
-                <RotateCcw size={13} aria-hidden="true" />
-                Reset shortcuts
-              </button>
-            </div>
+          <ShortcutsSection
+            shortcuts={draft.shortcuts}
+            recordingActionId={recordingActionId}
+            shortcutError={shortcutError}
+            shortcutsHelpId={shortcutsHelpId}
+            shortcutsStatusId={shortcutsStatusId}
+            resetShortcuts={resetShortcuts}
+            recordShortcut={recordShortcut}
+            clearShortcut={clearShortcut}
+            setRecordingActionId={setRecordingActionId}
+            setShortcutError={setShortcutError}
+          />
 
-            <div
-              className="shortcut-list"
-              role="list"
-              aria-describedby={`${shortcutsHelpId} ${shortcutsStatusId}`}
-            >
-              {SHORTCUT_ACTIONS.map((action) => {
-                const binding = draft.shortcuts[action.id];
-                const recording = recordingActionId === action.id;
-                return (
-                  <div className="shortcut-row" role="listitem" key={action.id}>
-                    <div className="shortcut-row__copy">
-                      <span className="shortcut-row__section">{action.section}</span>
-                      <strong>{action.label}</strong>
-                      <small>{action.description}</small>
-                    </div>
-                    <div className="shortcut-row__actions">
-                      <button
-                        className={`shortcut-recorder${recording ? " shortcut-recorder--recording" : ""}`}
-                        type="button"
-                        aria-pressed={recording}
-                        aria-label={`${action.label}: ${recording ? "press a shortcut" : formatShortcutBinding(binding)}`}
-                        onClick={() => {
-                          setRecordingActionId(recording ? null : action.id);
-                          setShortcutError("");
-                        }}
-                        onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
-                          if (recording) recordShortcut(action.id, event);
-                        }}
-                        onBlur={() => {
-                          if (recording) setRecordingActionId(null);
-                        }}
-                      >
-                        {recording ? "Press shortcut…" : formatShortcutBinding(binding)}
-                      </button>
-                      <button
-                        className="shortcut-clear"
-                        type="button"
-                        disabled={!binding}
-                        aria-label={`Clear shortcut for ${action.label}`}
-                        title="Clear shortcut"
-                        onClick={() => clearShortcut(action.id)}
-                      >
-                        <X size={13} aria-hidden="true" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div
-              id={shortcutsStatusId}
-              className={`shortcut-status${shortcutError ? " shortcut-status--error" : ""}`}
-              role={shortcutError ? "alert" : "status"}
-              aria-live="polite"
-            >
-              {shortcutError ||
-                (recordingActionId
-                  ? `Recording ${getShortcutAction(recordingActionId).label}. Escape cancels; Backspace clears.`
-                  : "Unassigned actions remain available from visible controls and the command palette.")}
-            </div>
-          </section>
-
-          <section className="settings-section" aria-labelledby="settings-persistence-title">
-            <div className="settings-section__heading">
-              <Database size={15} aria-hidden="true" />
-              <div>
-                <h3 id="settings-persistence-title">Workspace restore</h3>
-                <p>Restore saved layout metadata while always starting fresh terminal processes.</p>
-              </div>
-            </div>
-
-            <div className="settings-form-grid">
-              <label className="settings-toggle settings-field--wide">
-                <input
-                  type="checkbox"
-                  checked={draft.persistence.restoreWorkspaces}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    setDraft((current) => ({
-                      ...current,
-                      persistence: {
-                        ...current.persistence,
-                        restoreWorkspaces: event.target.checked,
-                      },
-                    }))
-                  }
-                />
-                <span>
-                  <strong>Restore workspaces on launch</strong>
-                  <small>Stores bounded layout metadata and, when enabled below, inert terminal history.</small>
-                </span>
-              </label>
-              <label className="settings-field settings-field--wide">
-                <span>Restored terminal history lines</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={MAX_TERMINAL_HISTORY_LINES}
-                  step={100}
-                  value={draft.persistence.terminalHistoryLines}
-                  disabled={!draft.persistence.restoreWorkspaces}
-                  aria-describedby={historyHelpId}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    setDraft((current) => ({
-                      ...current,
-                      persistence: {
-                        ...current.persistence,
-                        terminalHistoryLines: Number(event.target.value),
-                      },
-                    }))
-                  }
-                />
-                <small id={historyHelpId}>
-                  Use 0 to disable history. TonyMux stores at most 5,000 lines, 512 KiB per pane and 4 MiB total.
-                </small>
-              </label>
-              <div className="settings-persistence-action settings-field--wide">
-                <div>
-                  <strong>Saved workspace state</strong>
-                  <small>Clearing it does not remove TonyMux settings or close current panes.</small>
-                </div>
-                <button
-                  className="settings-button settings-button--danger"
-                  type="button"
-                  onClick={clearSavedWorkspaceState}
-                >
-                  <Trash2 size={14} />
-                  Clear saved state
-                </button>
-              </div>
-            </div>
-          </section>
+          <PersistenceSection
+            persistence={draft.persistence}
+            setDraft={setDraft}
+            historyHelpId={historyHelpId}
+            clearSavedWorkspaceState={clearSavedWorkspaceState}
+          />
 
         </div>
 
