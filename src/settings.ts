@@ -133,9 +133,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   shortcuts: cloneDefaultShortcutBindings(),
 };
 
-export const DEFAULT_TERMINAL_PANE_SETTINGS: TerminalPaneSettings =
-  snapshotTerminalSettings(DEFAULT_SETTINGS);
-
 const BUILT_IN_PROFILE_IDS = new Set<BuiltInShellProfileId>(
   SHELL_PROFILES.map((profile) => profile.id),
 );
